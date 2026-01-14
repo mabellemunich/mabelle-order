@@ -1,1367 +1,1389 @@
-import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  onAuthStateChanged,
-  signInWithCustomToken
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  doc, 
-  updateDoc, 
-  serverTimestamp, 
-  deleteDoc, 
-  writeBatch, 
-  getDoc, 
-  setDoc, 
-  getDocs, 
-  where, 
-  arrayUnion
-} from 'firebase/firestore';
-import { 
-  ChefHat, ClipboardList, Plus, Minus, ShoppingCart, Send, CheckCircle, 
-  Trash2, Coffee, Carrot, Beef, Milk, Package, Search, ArrowLeft, 
-  RefreshCw, Clock, Store, Truck, Printer, CheckSquare, Eye, X, 
-  Wine, Flame, Cloud, Calculator, Settings, Save, Edit2, LogOut, 
-  Lock, KeyRound, Tag, Phone, Mail, MessageSquare, Archive, Download, 
-  History, BarChart3, Calendar, AlertTriangle, Filter, ArrowUp, ArrowDown,
-  EyeOff, RotateCcw, LayoutList, Layers, FileSpreadsheet, User, Upload,
-  Check, Map, Footprints, FileText, GripVertical
-} from 'lucide-react';
-
-// --- WICHTIG: HIER DEINE FIREBASE DATEN EINFÜGEN ---
-// ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-const firebaseConfig = {
-  apiKey: "AIzaSyD0Jl_KAY_ifECR2WD1-SYhsYpkgU2Fysw",
-  authDomain: "mabell-order-system.firebaseapp.com",
-  projectId: "mabell-order-system",
-  storageBucket: "mabell-order-system.firebasestorage.app",
-  messagingSenderId: "151693763454",
-  appId: "1:151693763454:web:e42600a984ba87f233492f"
-};
-// ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
-
-
-// --- Initialisierung ---
-const appConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseConfig;
-const app = initializeApp(appConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// Fester Name für die App-Daten
-const appId = typeof __app_id !== 'undefined' ? __app_id : "mabell-order-system";
-
-// --- Data & Constants ---
-
-const DEFAULT_PIN = "311088";
-
-const ICON_MAP = {
-  'carrot': <Carrot className="w-5 h-5" />,
-  'milk': <Milk className="w-5 h-5" />,
-  'beef': <Beef className="w-5 h-5" />,
-  'coffee': <Coffee className="w-5 h-5" />,
-  'wine': <Wine className="w-5 h-5" />,
-  'package': <Package className="w-5 h-5" />,
-  'cloud': <Cloud className="w-5 h-5" />,
-  'flame': <Flame className="w-5 h-5" />,
-  'tag': <Tag className="w-5 h-5" />
-};
-
-const DEPT_NAMES = {
-    'kitchen': 'Küche',
-    'bar': 'Bar',
-    'shisha': 'Shisha'
-};
-
-// --- Helper Functions ---
-const formatDate = (timestamp) => {
-  if (!timestamp) return 'Gerade eben';
-  const date = timestamp.toDate ? timestamp.toDate() : new Date();
-  return new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
-};
-
-const formatTime = (timestamp) => {
-  if (!timestamp) return '';
-  const date = timestamp.toDate ? timestamp.toDate() : new Date();
-  return new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(date);
-};
-
-// --- Components ---
-
-const Loading = () => (
-  <div className="flex flex-col items-center justify-center h-screen bg-slate-50 text-slate-600">
-    <RefreshCw className="w-10 h-10 animate-spin mb-4 text-pink-600" />
-    <p>Lade MABELLE Order...</p>
-  </div>
-);
-
-const Numpad = ({ onDigit, onClear, onEnter }) => {
-  return (
-    <div className="grid grid-cols-3 gap-3 mt-4 w-full max-w-xs mx-auto">
-      {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-        <button key={num} onClick={() => onDigit(num)} className="h-14 w-full bg-slate-50 border-b-4 border-slate-200 rounded-xl text-2xl font-bold text-slate-700 shadow-sm active:border-b-0 active:translate-y-1 active:bg-slate-100 transition-all">{num}</button>
-      ))}
-      <button onClick={onClear} className="h-14 w-full bg-red-50 border-b-4 border-red-200 rounded-xl flex items-center justify-center text-red-500 shadow-sm active:border-b-0 active:translate-y-1 active:bg-red-100 transition-all"><ArrowLeft className="w-6 h-6" /></button>
-      <button onClick={() => onDigit(0)} className="h-14 w-full bg-slate-50 border-b-4 border-slate-200 rounded-xl text-2xl font-bold text-slate-700 shadow-sm active:border-b-0 active:translate-y-1 active:bg-slate-100 transition-all">0</button>
-      <button onClick={onEnter} className="h-14 w-full bg-emerald-600 border-b-4 border-emerald-800 rounded-xl flex items-center justify-center text-white shadow-sm active:border-b-0 active:translate-y-1 active:bg-emerald-700 transition-all"><CheckCircle className="w-7 h-7" /></button>
-    </div>
-  );
-};
-
-// --- Seed Data ---
-const INITIAL_CATEGORIES_SEED = [
-  { id: 'gemuese', name: 'Obst & Gemüse', iconKey: 'carrot', allowedRoles: ['kitchen'], sortOrder: 10 },
-  { id: 'molkerei', name: 'Molkerei & Eier', iconKey: 'milk', allowedRoles: ['kitchen'], sortOrder: 20 },
-  { id: 'fleisch', name: 'Fleisch & Fisch', iconKey: 'beef', allowedRoles: ['kitchen'], sortOrder: 30 },
-  { id: 'trocken', name: 'Trockensortiment', iconKey: 'coffee', allowedRoles: ['kitchen'], sortOrder: 40 },
-  { id: 'alkohol', name: 'Spirituosen', iconKey: 'wine', allowedRoles: ['bar'], sortOrder: 50 },
-  { id: 'softdrinks', name: 'Softdrinks & Säfte', iconKey: 'coffee', allowedRoles: ['bar'], sortOrder: 60 },
-  { id: 'bar-supplies', name: 'Bar Zubehör', iconKey: 'package', allowedRoles: ['bar'], sortOrder: 70 },
-  { id: 'tabak', name: 'Tabak Sortiment', iconKey: 'cloud', allowedRoles: ['shisha'], sortOrder: 80 },
-  { id: 'kohle', name: 'Kohle & Zubehör', iconKey: 'flame', allowedRoles: ['shisha'], sortOrder: 90 },
-  { id: 'sonstiges', name: 'Sonstiges', iconKey: 'package', allowedRoles: ['kitchen', 'bar', 'shisha'], sortOrder: 100 },
-];
-const INITIAL_SUPPLIERS_SEED = [
-    { name: 'Hamberger', phone: '', email: '', orderMethod: 'shopping' },
-    { name: 'Obst & Gemüse Händler', phone: '', email: '', orderMethod: 'direct' },
-    { name: 'Shisha Bedarf', phone: '', email: '', orderMethod: 'shopping' }
-];
-
-// --- MANAGEMENT COMPONENTS ---
-
-const CategoryManager = ({ categories, appId }) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const [currentCat, setCurrentCat] = useState(null);
-  const [draggedCatId, setDraggedCatId] = useState(null);
-
-  const emptyCat = { name: '', iconKey: 'tag', allowedRoles: [], sortOrder: 100 };
-
-  const handleEdit = (cat) => { 
-      setCurrentCat({ 
-          ...cat, 
-          allowedRoles: cat.allowedRoles || [] 
-      }); 
-      setIsEditing(true); 
-  };
-  const handleAddNew = () => { 
-      const maxOrder = categories.length > 0 ? Math.max(...categories.map(c => c.sortOrder || 0)) : 0;
-      setCurrentCat({ ...emptyCat, sortOrder: maxOrder + 10 }); 
-      setIsEditing(true); 
-  };
-  
-  const toggleRole = (role) => {
-    setCurrentCat(prev => {
-        const currentRoles = prev.allowedRoles.includes(role) ? prev.allowedRoles.filter(r => r !== role) : [...prev.allowedRoles, role];
-        return { ...prev, allowedRoles: currentRoles }; 
-    });
-  };
-  
-  const handleSave = async () => {
-    if (!currentCat.name || !currentCat.allowedRoles || currentCat.allowedRoles.length === 0) {
-        return alert("Bitte Namen und mindestens eine Abteilung wählen.");
-    }
-    try {
-      const catData = { name: currentCat.name, iconKey: currentCat.iconKey || 'tag', allowedRoles: currentCat.allowedRoles, sortOrder: currentCat.sortOrder || 100 };
-      if (currentCat.id) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', currentCat.id), catData);
-      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), catData);
-      setIsEditing(false); setCurrentCat(null);
-    } catch (e) { alert("Fehler beim Speichern"); }
-  };
-
-  const handleDelete = async (id) => { if (confirm("Gruppe wirklich löschen?")) try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', id)); } catch (e) { alert("Fehler"); } };
-  
-  // --- DRAG & DROP FÜR KATEGORIEN ---
-  const handleDragStart = (e, id) => {
-      setDraggedCatId(id);
-      e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleDragOver = (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-  };
-
-  const handleDrop = async (e, targetId, list) => {
-      e.preventDefault();
-      if (!draggedCatId || draggedCatId === targetId) return;
-
-      const draggedIndex = list.findIndex(c => c.id === draggedCatId);
-      const targetIndex = list.findIndex(c => c.id === targetId);
-      
-      if (draggedIndex === -1 || targetIndex === -1) return;
-
-      const newList = [...list];
-      const [movedItem] = newList.splice(draggedIndex, 1);
-      newList.splice(targetIndex, 0, movedItem);
-
-      const batch = writeBatch(db);
-      newList.forEach((cat, idx) => {
-          const newSortOrder = (idx + 1) * 10;
-          if (cat.sortOrder !== newSortOrder) {
-              batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'categories', cat.id), { sortOrder: newSortOrder });
-          }
-      });
-
-      try {
-          await batch.commit();
-      } catch (error) {
-          console.error("Fehler beim Sortieren:", error);
-      }
-      setDraggedCatId(null);
-  };
-
-  const groupedCategories = { kitchen: [], bar: [], shisha: [], other: [] };
-  const sortedCats = [...categories].sort((a,b)=>(a.sortOrder||999)-(b.sortOrder||999));
-  
-  sortedCats.forEach(c => {
-      if(c.allowedRoles.includes('kitchen')) groupedCategories.kitchen.push(c);
-      else if(c.allowedRoles.includes('bar')) groupedCategories.bar.push(c);
-      else if(c.allowedRoles.includes('shisha')) groupedCategories.shisha.push(c);
-      else groupedCategories.other.push(c);
-  });
-
-  const renderList = (title, list) => (
-    <div className="mb-6">
-      <h4 className="text-sm font-bold text-slate-400 uppercase mb-2 border-b pb-1">{title}</h4>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {list.map((cat, idx) => (
-          <div 
-            key={cat.id} 
-            draggable
-            onDragStart={(e) => handleDragStart(e, cat.id)}
-            onDragOver={handleDragOver}
-            onDrop={(e) => handleDrop(e, cat.id, list)}
-            className={`flex justify-between items-center p-4 bg-white border border-slate-200 rounded-xl shadow-sm cursor-grab active:cursor-grabbing ${draggedCatId === cat.id ? 'opacity-50 ring-2 ring-pink-300' : ''}`}
-          >
-            <div className="flex items-center gap-3">
-              <GripVertical className="w-5 h-5 text-slate-300" />
-              <div className="p-2 bg-slate-100 rounded-full text-slate-600">{ICON_MAP[cat.iconKey] || <Tag className="w-5 h-5"/>}</div>
-              <div>
-                <div className="font-bold text-slate-800">{cat.name}</div>
-                <div className="text-xs text-slate-500 flex gap-1">{cat.allowedRoles.map(r => (<span key={r} className="bg-slate-100 px-1 rounded">{DEPT_NAMES[r] || r}</span>))}</div>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => handleEdit(cat)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg"><Edit2 className="w-4 h-4"/></button>
-              <button onClick={() => handleDelete(cat.id)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  if (isEditing) return (<div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold text-slate-800">Gruppe bearbeiten</h2><button onClick={() => setIsEditing(false)}><X/></button></div><div className="grid gap-4 max-w-xl"><div><label className="block text-sm font-medium mb-1">Name</label><input className="w-full p-2 border rounded" value={currentCat.name} onChange={e => setCurrentCat({...currentCat, name: e.target.value})} /></div><div><label className="block text-sm font-medium mb-2">Abteilung</label><div className="flex gap-4">{['kitchen', 'bar', 'shisha'].map(r => (<label key={r} className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-2 rounded border"><input type="checkbox" checked={currentCat.allowedRoles.includes(r)} onChange={() => toggleRole(r)} className="text-pink-600" /><span>{DEPT_NAMES[r]}</span></label>))}</div></div><div><label className="block text-sm font-medium mb-2">Icon</label><div className="flex flex-wrap gap-2">{Object.keys(ICON_MAP).map(k => (<button key={k} onClick={() => setCurrentCat({...currentCat, iconKey: k})} className={`p-3 rounded border ${currentCat.iconKey === k ? 'bg-pink-100 border-pink-500' : ''}`}>{ICON_MAP[k]}</button>))}</div></div>
-    <div><label className="block text-sm font-medium mb-1 flex items-center gap-2"><Map className="w-4 h-4"/> Laufweg / Position (Sortierung)</label><input type="number" className="w-full p-2 border rounded" value={currentCat.sortOrder} onChange={e => setCurrentCat({...currentCat, sortOrder: parseInt(e.target.value) || 100})} /><p className="text-xs text-slate-500 mt-1">Bestimmt die Reihenfolge auf dem Einkaufszettel (1 = Zuerst, 100 = Zuletzt)</p></div>
-  <div className="pt-4"><button onClick={handleSave} className="w-full bg-pink-600 text-white py-2 rounded font-bold">Speichern</button></div></div></div>);
-  return (<div className="space-y-4"><div className="flex justify-between items-center"><h3 className="font-bold text-slate-700">Gruppen & Laufweg</h3><button onClick={handleAddNew} className="flex items-center gap-2 px-3 py-2 bg-pink-600 text-white rounded font-bold"><Plus className="w-4 h-4"/> Neu</button></div>{renderList('Küche', groupedCategories.kitchen)}{renderList('Bar', groupedCategories.bar)}{renderList('Shisha', groupedCategories.shisha)}{groupedCategories.other.length>0&&renderList('Sonstige', groupedCategories.other)}</div>);
-};
-
-const SupplierManager = ({ suppliers, appId }) => {
-    const [isEditing, setIsEditing] = useState(false);
-    const [currentSup, setCurrentSup] = useState(null);
-    const [draggedIndex, setDraggedIndex] = useState(null);
-
-    const emptySup = { name: '', phone: '', email: '', customerNumber: '', ourName: '', orderMethod: 'direct', sortOrder: 100 };
-    const handleEdit = (sup) => { setCurrentSup({ ...sup }); setIsEditing(true); };
-    const handleAddNew = () => { 
-        const maxOrder = suppliers.length > 0 ? Math.max(...suppliers.map(s => s.sortOrder || 0)) : 0;
-        setCurrentSup({ ...emptySup, sortOrder: maxOrder + 10 }); 
-        setIsEditing(true); 
-    };
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MABELLE Order System</title>
     
-    const handleSave = async () => {
-      if (!currentSup.name) return alert("Bitte Name eingeben");
-      try {
-        const oldName = currentSup.id ? suppliers.find(s => s.id === currentSup.id)?.name : null;
-        const supData = { 
-            name: currentSup.name, 
-            phone: currentSup.phone||'', 
-            email: currentSup.email||'', 
-            customerNumber: currentSup.customerNumber||'', 
-            ourName: currentSup.ourName||'', 
-            orderMethod: currentSup.orderMethod||'direct',
-            sortOrder: currentSup.sortOrder || 100
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Babel für JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Import Map für Module -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js",
+        "lucide-react": "https://esm.sh/lucide-react@0.344.0"
+      }
+    }
+    </script>
+</head>
+<body class="bg-slate-100 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { initializeApp } from 'firebase/app';
+        import { 
+            getAuth, 
+            signInAnonymously, 
+            onAuthStateChanged,
+            signInWithCustomToken
+        } from 'firebase/auth';
+        import { 
+            getFirestore, 
+            collection, 
+            addDoc, 
+            query, 
+            orderBy, 
+            onSnapshot, 
+            doc, 
+            updateDoc, 
+            serverTimestamp, 
+            deleteDoc, 
+            writeBatch, 
+            getDoc, 
+            setDoc, 
+            getDocs, 
+            where, 
+            arrayUnion
+        } from 'firebase/firestore';
+        import { 
+            ChefHat, ClipboardList, Plus, Minus, ShoppingCart, Send, CheckCircle, 
+            Trash2, Coffee, Carrot, Beef, Milk, Package, Search, ArrowLeft, 
+            RefreshCw, Clock, Store, Truck, Printer, CheckSquare, Eye, X, 
+            Wine, Flame, Cloud, Calculator, Settings, Save, Edit2, LogOut, 
+            Lock, KeyRound, Tag, Phone, Mail, MessageSquare, Archive, Download, 
+            History, BarChart3, Calendar, AlertTriangle, Filter, ArrowUp, ArrowDown,
+            EyeOff, RotateCcw, LayoutList, Layers, FileSpreadsheet, User, Upload,
+            Check, Map, Footprints, FileText, GripVertical
+        } from 'lucide-react';
+
+        // --- FIREBASE KONFIGURATION ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyD0Jl_KAY_ifECR2WD1-SYhsYpkgU2Fysw",
+            authDomain: "mabell-order-system.firebaseapp.com",
+            projectId: "mabell-order-system",
+            storageBucket: "mabell-order-system.firebasestorage.app",
+            messagingSenderId: "151693763454",
+            appId: "1:151693763454:web:e42600a984ba87f233492f"
+        };
+
+        // --- Initialisierung ---
+        // Prüfen, ob eine Umgebungskonfiguration vorhanden ist, sonst Standard verwenden
+        const appConfig = (typeof window.__firebase_config !== 'undefined') ? JSON.parse(window.__firebase_config) : firebaseConfig;
+        const app = initializeApp(appConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // App ID
+        const appId = (typeof window.__app_id !== 'undefined') ? window.__app_id : "mabell-order-system";
+
+        // --- Data & Constants ---
+
+        const DEFAULT_PIN = "311088";
+
+        const ICON_MAP = {
+        'carrot': <Carrot className="w-5 h-5" />,
+        'milk': <Milk className="w-5 h-5" />,
+        'beef': <Beef className="w-5 h-5" />,
+        'coffee': <Coffee className="w-5 h-5" />,
+        'wine': <Wine className="w-5 h-5" />,
+        'package': <Package className="w-5 h-5" />,
+        'cloud': <Cloud className="w-5 h-5" />,
+        'flame': <Flame className="w-5 h-5" />,
+        'tag': <Tag className="w-5 h-5" />
+        };
+
+        const DEPT_NAMES = {
+            'kitchen': 'Küche',
+            'bar': 'Bar',
+            'shisha': 'Shisha'
+        };
+
+        // --- Helper Functions ---
+        const formatDate = (timestamp) => {
+        if (!timestamp) return 'Gerade eben';
+        const date = timestamp.toDate ? timestamp.toDate() : new Date();
+        return new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
+        };
+
+        const formatTime = (timestamp) => {
+        if (!timestamp) return '';
+        const date = timestamp.toDate ? timestamp.toDate() : new Date();
+        return new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(date);
+        };
+
+        // --- Components ---
+
+        const Loading = () => (
+        <div className="flex flex-col items-center justify-center h-screen bg-slate-50 text-slate-600">
+            <RefreshCw className="w-10 h-10 animate-spin mb-4 text-pink-600" />
+            <p>Lade MABELLE Order...</p>
+        </div>
+        );
+
+        const Numpad = ({ onDigit, onClear, onEnter }) => {
+        return (
+            <div className="grid grid-cols-3 gap-3 mt-4 w-full max-w-xs mx-auto">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                <button key={num} onClick={() => onDigit(num)} className="h-14 w-full bg-slate-50 border-b-4 border-slate-200 rounded-xl text-2xl font-bold text-slate-700 shadow-sm active:border-b-0 active:translate-y-1 active:bg-slate-100 transition-all">{num}</button>
+            ))}
+            <button onClick={onClear} className="h-14 w-full bg-red-50 border-b-4 border-red-200 rounded-xl flex items-center justify-center text-red-500 shadow-sm active:border-b-0 active:translate-y-1 active:bg-red-100 transition-all"><ArrowLeft className="w-6 h-6" /></button>
+            <button onClick={() => onDigit(0)} className="h-14 w-full bg-slate-50 border-b-4 border-slate-200 rounded-xl text-2xl font-bold text-slate-700 shadow-sm active:border-b-0 active:translate-y-1 active:bg-slate-100 transition-all">0</button>
+            <button onClick={onEnter} className="h-14 w-full bg-emerald-600 border-b-4 border-emerald-800 rounded-xl flex items-center justify-center text-white shadow-sm active:border-b-0 active:translate-y-1 active:bg-emerald-700 transition-all"><CheckCircle className="w-7 h-7" /></button>
+            </div>
+        );
+        };
+
+        // --- MANAGEMENT COMPONENTS ---
+
+        const CategoryManager = ({ categories, appId }) => {
+        const [isEditing, setIsEditing] = useState(false);
+        const [currentCat, setCurrentCat] = useState(null);
+        const [draggedCatId, setDraggedCatId] = useState(null);
+
+        const emptyCat = { name: '', iconKey: 'tag', allowedRoles: [], sortOrder: 100 };
+
+        const handleEdit = (cat) => { 
+            setCurrentCat({ 
+                ...cat, 
+                allowedRoles: cat.allowedRoles || [] 
+            }); 
+            setIsEditing(true); 
+        };
+        const handleAddNew = () => { 
+            const maxOrder = categories.length > 0 ? Math.max(...categories.map(c => c.sortOrder || 0)) : 0;
+            setCurrentCat({ ...emptyCat, sortOrder: maxOrder + 10 }); 
+            setIsEditing(true); 
         };
         
-        const batch = writeBatch(db);
-        if (currentSup.id) {
-            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'suppliers', currentSup.id), supData);
-            if (oldName && oldName !== currentSup.name) {
-                const prodQuery = query(collection(db, 'artifacts', appId, 'public', 'data', 'products'), where("supplier", "==", oldName));
-                const prodSnapshot = await getDocs(prodQuery);
-                prodSnapshot.forEach(doc => { batch.update(doc.ref, { supplier: currentSup.name }); });
+        const toggleRole = (role) => {
+            setCurrentCat(prev => {
+                const currentRoles = prev.allowedRoles.includes(role) ? prev.allowedRoles.filter(r => r !== role) : [...prev.allowedRoles, role];
+                return { ...prev, allowedRoles: currentRoles }; 
+            });
+        };
+        
+        const handleSave = async () => {
+            if (!currentCat.name || !currentCat.allowedRoles || currentCat.allowedRoles.length === 0) {
+                return alert("Bitte Namen und mindestens eine Abteilung wählen.");
             }
-        } else {
-            batch.set(doc(collection(db, 'artifacts', appId, 'public', 'data', 'suppliers')), supData);
+            try {
+            const catData = { name: currentCat.name, iconKey: currentCat.iconKey || 'tag', allowedRoles: currentCat.allowedRoles, sortOrder: currentCat.sortOrder || 100 };
+            if (currentCat.id) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', currentCat.id), catData);
+            else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), catData);
+            setIsEditing(false); setCurrentCat(null);
+            } catch (e) { alert("Fehler beim Speichern"); }
+        };
+
+        const handleDelete = async (id) => { if (confirm("Gruppe wirklich löschen?")) try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', id)); } catch (e) { alert("Fehler"); } };
+        
+        // --- DRAG & DROP FÜR KATEGORIEN ---
+        const handleDragStart = (e, id) => {
+            setDraggedCatId(id);
+            e.dataTransfer.effectAllowed = "move";
+        };
+
+        const handleDragOver = (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+        };
+
+        const handleDrop = async (e, targetId, list) => {
+            e.preventDefault();
+            if (!draggedCatId || draggedCatId === targetId) return;
+
+            const draggedIndex = list.findIndex(c => c.id === draggedCatId);
+            const targetIndex = list.findIndex(c => c.id === targetId);
+            
+            if (draggedIndex === -1 || targetIndex === -1) return;
+
+            const newList = [...list];
+            const [movedItem] = newList.splice(draggedIndex, 1);
+            newList.splice(targetIndex, 0, movedItem);
+
+            const batch = writeBatch(db);
+            newList.forEach((cat, idx) => {
+                const newSortOrder = (idx + 1) * 10;
+                if (cat.sortOrder !== newSortOrder) {
+                    batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'categories', cat.id), { sortOrder: newSortOrder });
+                }
+            });
+
+            try {
+                await batch.commit();
+            } catch (error) {
+                console.error("Fehler beim Sortieren:", error);
+            }
+            setDraggedCatId(null);
+        };
+
+        const groupedCategories = { kitchen: [], bar: [], shisha: [], other: [] };
+        const sortedCats = [...categories].sort((a,b)=>(a.sortOrder||999)-(b.sortOrder||999));
+        
+        sortedCats.forEach(c => {
+            if(c.allowedRoles.includes('kitchen')) groupedCategories.kitchen.push(c);
+            else if(c.allowedRoles.includes('bar')) groupedCategories.bar.push(c);
+            else if(c.allowedRoles.includes('shisha')) groupedCategories.shisha.push(c);
+            else groupedCategories.other.push(c);
+        });
+
+        const renderList = (title, list) => (
+            <div className="mb-6">
+            <h4 className="text-sm font-bold text-slate-400 uppercase mb-2 border-b pb-1">{title}</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {list.map((cat, idx) => (
+                <div 
+                    key={cat.id} 
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, cat.id)}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, cat.id, list)}
+                    className={`flex justify-between items-center p-4 bg-white border border-slate-200 rounded-xl shadow-sm cursor-grab active:cursor-grabbing ${draggedCatId === cat.id ? 'opacity-50 ring-2 ring-pink-300' : ''}`}
+                >
+                    <div className="flex items-center gap-3">
+                    <GripVertical className="w-5 h-5 text-slate-300" />
+                    <div className="p-2 bg-slate-100 rounded-full text-slate-600">{ICON_MAP[cat.iconKey] || <Tag className="w-5 h-5"/>}</div>
+                    <div>
+                        <div className="font-bold text-slate-800">{cat.name}</div>
+                        <div className="text-xs text-slate-500 flex gap-1">{cat.allowedRoles.map(r => (<span key={r} className="bg-slate-100 px-1 rounded">{DEPT_NAMES[r] || r}</span>))}</div>
+                    </div>
+                    </div>
+                    <div className="flex gap-2">
+                    <button onClick={() => handleEdit(cat)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg"><Edit2 className="w-4 h-4"/></button>
+                    <button onClick={() => handleDelete(cat.id)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                    </div>
+                </div>
+                ))}
+            </div>
+            </div>
+        );
+
+        if (isEditing) return (<div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold text-slate-800">Gruppe bearbeiten</h2><button onClick={() => setIsEditing(false)}><X/></button></div><div className="grid gap-4 max-w-xl"><div><label className="block text-sm font-medium mb-1">Name</label><input className="w-full p-2 border rounded" value={currentCat.name} onChange={e => setCurrentCat({...currentCat, name: e.target.value})} /></div><div><label className="block text-sm font-medium mb-2">Abteilung</label><div className="flex gap-4">{['kitchen', 'bar', 'shisha'].map(r => (<label key={r} className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-2 rounded border"><input type="checkbox" checked={currentCat.allowedRoles.includes(r)} onChange={() => toggleRole(r)} className="text-pink-600" /><span>{DEPT_NAMES[r]}</span></label>))}</div></div><div><label className="block text-sm font-medium mb-2">Icon</label><div className="flex flex-wrap gap-2">{Object.keys(ICON_MAP).map(k => (<button key={k} onClick={() => setCurrentCat({...currentCat, iconKey: k})} className={`p-3 rounded border ${currentCat.iconKey === k ? 'bg-pink-100 border-pink-500' : ''}`}>{ICON_MAP[k]}</button>))}</div></div>
+            <div><label className="block text-sm font-medium mb-1 flex items-center gap-2"><Map className="w-4 h-4"/> Laufweg / Position (Sortierung)</label><input type="number" className="w-full p-2 border rounded" value={currentCat.sortOrder} onChange={e => setCurrentCat({...currentCat, sortOrder: parseInt(e.target.value) || 100})} /><p className="text-xs text-slate-500 mt-1">Bestimmt die Reihenfolge auf dem Einkaufszettel (1 = Zuerst, 100 = Zuletzt)</p></div>
+        <div className="pt-4"><button onClick={handleSave} className="w-full bg-pink-600 text-white py-2 rounded font-bold">Speichern</button></div></div></div>);
+        return (<div className="space-y-4"><div className="flex justify-between items-center"><h3 className="font-bold text-slate-700">Gruppen & Laufweg</h3><button onClick={handleAddNew} className="flex items-center gap-2 px-3 py-2 bg-pink-600 text-white rounded font-bold"><Plus className="w-4 h-4"/> Neu</button></div>{renderList('Küche', groupedCategories.kitchen)}{renderList('Bar', groupedCategories.bar)}{renderList('Shisha', groupedCategories.shisha)}{groupedCategories.other.length>0&&renderList('Sonstige', groupedCategories.other)}</div>);
+        };
+
+        const SupplierManager = ({ suppliers, appId }) => {
+            const [isEditing, setIsEditing] = useState(false);
+            const [currentSup, setCurrentSup] = useState(null);
+            const [draggedIndex, setDraggedIndex] = useState(null);
+
+            const emptySup = { name: '', phone: '', email: '', customerNumber: '', ourName: '', orderMethod: 'direct', sortOrder: 100 };
+            const handleEdit = (sup) => { setCurrentSup({ ...sup }); setIsEditing(true); };
+            const handleAddNew = () => { 
+                const maxOrder = suppliers.length > 0 ? Math.max(...suppliers.map(s => s.sortOrder || 0)) : 0;
+                setCurrentSup({ ...emptySup, sortOrder: maxOrder + 10 }); 
+                setIsEditing(true); 
+            };
+            
+            const handleSave = async () => {
+            if (!currentSup.name) return alert("Bitte Name eingeben");
+            try {
+                const oldName = currentSup.id ? suppliers.find(s => s.id === currentSup.id)?.name : null;
+                const supData = { 
+                    name: currentSup.name, 
+                    phone: currentSup.phone||'', 
+                    email: currentSup.email||'', 
+                    customerNumber: currentSup.customerNumber||'', 
+                    ourName: currentSup.ourName||'', 
+                    orderMethod: currentSup.orderMethod||'direct',
+                    sortOrder: currentSup.sortOrder || 100
+                };
+                
+                const batch = writeBatch(db);
+                if (currentSup.id) {
+                    batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'suppliers', currentSup.id), supData);
+                    if (oldName && oldName !== currentSup.name) {
+                        const prodQuery = query(collection(db, 'artifacts', appId, 'public', 'data', 'products'), where("supplier", "==", oldName));
+                        const prodSnapshot = await getDocs(prodQuery);
+                        prodSnapshot.forEach(doc => { batch.update(doc.ref, { supplier: currentSup.name }); });
+                    }
+                } else {
+                    batch.set(doc(collection(db, 'artifacts', appId, 'public', 'data', 'suppliers')), supData);
+                }
+                await batch.commit();
+                setIsEditing(false); setCurrentSup(null);
+            } catch (e) { alert("Fehler: " + e.message); }
+            };
+            const handleDelete = async (id) => { if (confirm("Löschen?")) try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'suppliers', id)); } catch (e) { alert("Fehler"); } };
+            
+            const handleDragStart = (e, index) => {
+                setDraggedIndex(index);
+                e.dataTransfer.effectAllowed = "move";
+            };
+
+            const handleDragOver = (e, index) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+            };
+
+            const handleDrop = async (e, targetIndex) => {
+                e.preventDefault();
+                if (draggedIndex === null || draggedIndex === targetIndex) return;
+
+                const newSuppliers = [...suppliers];
+                const [movedItem] = newSuppliers.splice(draggedIndex, 1);
+                newSuppliers.splice(targetIndex, 0, movedItem);
+
+                const batch = writeBatch(db);
+                newSuppliers.forEach((sup, idx) => {
+                    const newSortOrder = (idx + 1) * 10; 
+                    if (sup.sortOrder !== newSortOrder) {
+                        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'suppliers', sup.id), { sortOrder: newSortOrder });
+                    }
+                });
+
+                try {
+                    await batch.commit();
+                } catch (error) {
+                    console.error("Fehler beim Sortieren:", error);
+                    alert("Fehler beim Verschieben.");
+                }
+                setDraggedIndex(null);
+            };
+
+            if (isEditing) return (<div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between mb-6"><h2 className="text-xl font-bold">Lieferant bearbeiten</h2><button onClick={() => setIsEditing(false)}><X/></button></div><div className="space-y-4"><input className="w-full border p-2 rounded" value={currentSup.name} onChange={e=>setCurrentSup({...currentSup, name: e.target.value})} placeholder="Name"/><input className="w-full border p-2 rounded" value={currentSup.phone} onChange={e=>setCurrentSup({...currentSup, phone: e.target.value})} placeholder="Telefon"/><input className="w-full border p-2 rounded" value={currentSup.email} onChange={e=>setCurrentSup({...currentSup, email: e.target.value})} placeholder="Email"/><div className="grid grid-cols-2 gap-4"><input className="border p-2 rounded" value={currentSup.customerNumber||''} onChange={e=>setCurrentSup({...currentSup, customerNumber: e.target.value})} placeholder="Kd-Nr"/><input className="border p-2 rounded" value={currentSup.ourName||''} onChange={e=>setCurrentSup({...currentSup, ourName: e.target.value})} placeholder="Unser Name"/></div><div className="flex gap-4"><button onClick={()=>setCurrentSup({...currentSup, orderMethod:'direct'})} className={`flex-1 p-3 border rounded ${currentSup.orderMethod==='direct'?'bg-pink-50 border-pink-500':''}`}>
+            <FileText className="w-5 h-5"/>
+            <span className="text-xs font-bold">Direkt (PDF)</span>
+            </button><button onClick={()=>setCurrentSup({...currentSup, orderMethod:'shopping'})} className={`flex-1 p-3 border rounded ${currentSup.orderMethod==='shopping'?'bg-pink-50 border-pink-500':''}`}>
+            <ShoppingCart className="w-5 h-5"/>
+            <span className="text-xs font-bold">Einkaufsliste</span>
+            </button></div><button onClick={handleSave} className="w-full bg-pink-600 text-white p-2 rounded font-bold">Speichern</button></div></div>);
+            
+            return (<div className="space-y-4"><div className="flex justify-between items-center"><h3 className="font-bold text-slate-700">Lieferanten</h3><button onClick={handleAddNew} className="flex items-center gap-2 px-3 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg text-sm font-bold"><Plus className="w-4 h-4"/> Neu</button></div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {suppliers.map((sup, idx) => (
+                    <div 
+                        key={sup.id} 
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragOver={(e) => handleDragOver(e, idx)}
+                        onDrop={(e) => handleDrop(e, idx)}
+                        className={`p-4 bg-white border border-slate-200 rounded-xl shadow-sm transition-all ${draggedIndex === idx ? 'opacity-50 ring-2 ring-pink-300' : 'hover:shadow-md'}`}
+                    >
+                        <div className="flex justify-between items-start mb-2">
+                            <div className="font-bold text-slate-800 text-lg flex items-center gap-2 cursor-grab active:cursor-grabbing">
+                                <GripVertical className="w-4 h-4 text-slate-400" />
+                                {sup.name}
+                            </div>
+                            <button onClick={() => handleEdit(sup)} className="text-slate-400 hover:text-slate-600"><Edit2 className="w-4 h-4"/></button>
+                        </div>
+                        <div className="text-sm text-slate-500 space-y-1 ml-6">
+                            {sup.phone && <div className="flex items-center gap-2"><Phone className="w-3 h-3"/> {sup.phone}</div>}
+                            <div className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${sup.orderMethod === 'shopping' ? 'bg-orange-500' : 'bg-blue-500'}`}></span> {sup.orderMethod === 'shopping' ? 'Einkauf' : 'PDF Bestellung'}</div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+            </div>);
+        };
+
+        const ProductManager = ({ products, categories, suppliers, appId }) => {
+        const [isEditing, setIsEditing] = useState(false);
+        const [currentProduct, setCurrentProduct] = useState(null);
+        const [searchTerm, setSearchTerm] = useState('');
+        const [filterDept, setFilterDept] = useState('all');
+        const [filterCategory, setFilterCategory] = useState('all');
+        const [isImporting, setIsImporting] = useState(false);
+        const [importTarget, setImportTarget] = useState('shisha'); 
+        const [selectedProducts, setSelectedProducts] = useState([]);
+        
+        // Drag state for products
+        const [draggedProdId, setDraggedProdId] = useState(null);
+        
+        const emptyProduct = { name: '', unit: 'Stk', category: '', supplier: '', department: 'kitchen', targetStock: 0, sortOrder: 100, aisle: '' };
+
+        const handleEdit = (product) => { setCurrentProduct({ ...product }); setIsEditing(true); };
+        
+        const getCategoriesForDept = (dept) => {
+            return categories.filter(c => Array.isArray(c.allowedRoles) && c.allowedRoles.includes(dept));
+        };
+
+        const handleAddNew = () => { 
+            const defaultDept = filterDept !== 'all' ? filterDept : 'kitchen';
+            const validCats = getCategoriesForDept(defaultDept);
+            const defaultCat = validCats.length > 0 ? validCats[0].id : '';
+            const defaultSup = suppliers.length > 0 ? suppliers[0].name : '';
+
+            setCurrentProduct({ 
+                ...emptyProduct, 
+                department: defaultDept,
+                category: defaultCat, 
+                supplier: defaultSup
+            }); 
+            setIsEditing(true); 
+        };
+        
+        const handleEditDepartmentChange = (e) => {
+            const newDept = e.target.value;
+            const validCats = getCategoriesForDept(newDept);
+            const newCat = validCats.length > 0 ? validCats[0].id : '';
+            setCurrentProduct({ ...currentProduct, department: newDept, category: newCat });
+        };
+
+        const handleSave = async () => {
+            if (!currentProduct.name) return alert("Bitte Name");
+            try {
+            let productToSave = { ...currentProduct };
+            
+            const validCats = getCategoriesForDept(productToSave.department);
+            if (productToSave.category && !validCats.some(c => c.id === productToSave.category)) {
+                productToSave.category = validCats.length > 0 ? validCats[0].id : '';
+            }
+            
+            if (!productToSave.supplier && suppliers.length > 0) productToSave.supplier = suppliers[0].name;
+
+            if (productToSave.id) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', productToSave.id), productToSave);
+            else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'products'), productToSave);
+            setIsEditing(false); setCurrentProduct(null);
+            } catch (e) { alert("Fehler"); }
+        };
+
+        const toggleSelection = (id) => { setSelectedProducts(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]); };
+        
+        const handleSelectAll = (e) => {
+            if (e.target.checked) {
+                setSelectedProducts(sortedProducts.map(p => p.id));
+            } else {
+                setSelectedProducts([]);
+            }
+        };
+
+        const handleDeleteSelected = async () => {
+            if (selectedProducts.length === 0 || !confirm(`${selectedProducts.length} Artikel löschen?`)) return;
+            const batch = writeBatch(db);
+            selectedProducts.forEach(id => {
+                batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'products', id));
+            });
+            try { await batch.commit(); setSelectedProducts([]); alert("Gelöscht."); } catch(e) { alert("Fehler: " + e.message); }
+        };
+
+        const handleDragStart = (e, id) => {
+            setDraggedProdId(id);
+            e.dataTransfer.effectAllowed = "move";
+        };
+
+        const handleDragOver = (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+        };
+
+        const handleDrop = async (e, targetId) => {
+            e.preventDefault();
+            if (!draggedProdId || draggedProdId === targetId) return;
+
+            const draggedIndex = sortedProducts.findIndex(p => p.id === draggedProdId);
+            const targetIndex = sortedProducts.findIndex(p => p.id === targetId);
+
+            if (draggedIndex === -1 || targetIndex === -1) return;
+
+            const newList = [...sortedProducts];
+            const [movedItem] = newList.splice(draggedIndex, 1);
+            newList.splice(targetIndex, 0, movedItem);
+
+            const batch = writeBatch(db);
+            newList.forEach((prod, idx) => {
+                const newSortOrder = (idx + 1) * 10;
+                if (prod.sortOrder !== newSortOrder) {
+                    batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', prod.id), { sortOrder: newSortOrder });
+                }
+            });
+
+            try {
+                await batch.commit();
+            } catch (error) {
+                console.error("Fehler beim Sortieren:", error);
+                alert("Fehler beim Verschieben.");
+            }
+            setDraggedProdId(null);
+        };
+
+
+        const exportProductsToCSV = () => {
+            if (products.length === 0) return alert("Keine Artikel vorhanden.");
+            let csvContent = "\uFEFFName;Einheit;Abteilung;Kategorie;Lieferant;Gang;Position;Soll-Bestand\n";
+            const getDeptName = (d) => { if(d === 'kitchen') return 'Küche'; if(d === 'bar') return 'Bar'; if(d === 'shisha') return 'Shisha'; return d; };
+
+            products.forEach(p => {
+                const catName = categories.find(c => c.id === p.category)?.name || '';
+                const cleanName = p.name.replace(/;/g, ",");
+                const row = [cleanName, p.unit || '', getDeptName(p.department), catName, p.supplier || '', p.aisle || '', p.sortOrder || '', p.targetStock || ''].join(';');
+                csvContent += row + "\n";
+            });
+            const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "mabelle_artikel_backup.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+
+        const handleFileUpload = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const text = e.target.result;
+                const rows = text.split('\n');
+                const batch = writeBatch(db);
+                let count = 0;
+                const startIdx = rows[0].toLowerCase().includes('name') ? 1 : 0;
+
+                for (let i = startIdx; i < rows.length; i++) {
+                    const row = rows[i].trim(); 
+                    if(!row) continue;
+                    const cols = row.includes(';') ? row.split(';') : row.split(',');
+                    if(cols.length < 1) continue;
+                    
+                    const name = cols[0]?.trim();
+                    if(!name) continue; 
+
+                    const unit = cols[1]?.trim() || 'Stk';
+                    const deptRaw = cols[2]?.trim().toLowerCase() || 'kitchen'; 
+                    const catName = cols[3]?.trim() || '';
+                    const supplier = cols[4]?.trim() || 'Unbekannt';
+                    
+                    const aisle = cols[5]?.trim() || '';
+                    const sortOrder = cols[6] ? parseInt(cols[6].trim()) : 100 + i;
+                    const targetStock = cols[7] ? parseInt(cols[7].trim()) : 0;
+
+                    let department = 'kitchen';
+                    if (deptRaw.includes('bar')) department = 'bar';
+                    else if (deptRaw.includes('shisha')) department = 'shisha';
+                    else if (deptRaw.includes('küche') || deptRaw.includes('kitchen')) department = 'kitchen';
+
+                    let category = '';
+                    if (catName) {
+                        const foundCat = categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
+                        if (foundCat) category = foundCat.id;
+                    }
+                    
+                    const docRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'products'));
+                    batch.set(docRef, { name, unit, department, category, supplier, targetStock, sortOrder, aisle });
+                    count++;
+                }
+                try { await batch.commit(); alert(`${count} Artikel importiert.`); setIsImporting(false); } catch(e) { alert("Fehler beim Import: " + e.message); }
+            };
+            reader.readAsText(file);
+        };
+
+        const handleDeptChange = (e) => {
+            setFilterDept(e.target.value);
+            setFilterCategory('all');
+        };
+
+        const filteredProducts = products.filter(p => {
+            const matchSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.supplier.toLowerCase().includes(searchTerm.toLowerCase());
+            const matchDept = filterDept === 'all' || p.department === filterDept;
+            const matchCat = filterCategory === 'all' || p.category === filterCategory;
+            return matchSearch && matchDept && matchCat;
+        });
+
+        const sortedProducts = [...filteredProducts].sort((a, b) => {
+            // 1. Priorität: Aisle/Gang
+            const aisleA = a.aisle ? a.aisle.toString().toLowerCase() : 'zzz';
+            const aisleB = b.aisle ? b.aisle.toString().toLowerCase() : 'zzz';
+            
+            if (aisleA !== aisleB) return aisleA.localeCompare(aisleB, undefined, { numeric: true, sensitivity: 'base' });
+
+            // 2. Priorität: Manuelle Sortierung
+            const orderA = a.sortOrder !== undefined ? parseInt(a.sortOrder) : 9999;
+            const orderB = b.sortOrder !== undefined ? parseInt(b.sortOrder) : 9999;
+            if (orderA !== orderB) return orderA - orderB;
+            
+            // 3. Name
+            return a.name.localeCompare(b.name);
+        });
+
+        const moveProduct = async (index, direction) => {
+            if (index + direction < 0 || index + direction >= sortedProducts.length) return;
+            const itemA = sortedProducts[index]; 
+            const itemB = sortedProducts[index + direction];
+            
+            let valA = itemB.sortOrder || 100;
+            let valB = itemA.sortOrder || 100;
+
+            if (valA === valB) {
+                if (direction === -1) { 
+                    valA = valB - 5; 
+                    valB = valB + 5;
+                } else {
+                    valA = valB + 5;
+                    valB = valB - 5;
+                }
+            }
+
+            const batch = writeBatch(db);
+            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', itemA.id), { sortOrder: valA });
+            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', itemB.id), { sortOrder: valB });
+            try { await batch.commit(); } catch(e) {}
+        };
+
+        const visibleCategories = categories.filter(c => {
+            if (filterDept === 'all') return true;
+            return c.allowedRoles?.includes(filterDept);
+        });
+
+        if (isEditing) {
+            const availableCategories = getCategoriesForDept(currentProduct.department);
+            return (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold text-slate-800">Artikel bearbeiten</h2><button onClick={() => setIsEditing(false)}><X/></button></div>
+                <div className="grid gap-4 max-w-xl">
+                <div><label className="block text-sm font-medium mb-1">Name</label><input className="w-full border p-2 rounded" value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} /></div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div><label className="block text-sm font-medium mb-1">Einheit</label><input className="w-full border p-2 rounded" value={currentProduct.unit} onChange={e => setCurrentProduct({...currentProduct, unit: e.target.value})} /></div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Abteilung</label>
+                        <select className="w-full border p-2 rounded" value={currentProduct.department} onChange={handleEditDepartmentChange}>
+                            <option value="kitchen">Küche</option><option value="bar">Bar</option><option value="shisha">Shisha</option>
+                        </select>
+                    </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Kategorie</label>
+                        <select className="w-full border p-2 rounded" value={currentProduct.category} onChange={e => setCurrentProduct({...currentProduct, category: e.target.value})}>
+                            {availableCategories.length > 0 ? availableCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>) : <option value="">Keine Kategorien</option>}
+                        </select>
+                    </div>
+                    <div><label className="block text-sm font-medium mb-1">Lieferant</label><select className="w-full border p-2 rounded" value={currentProduct.supplier} onChange={e => setCurrentProduct({...currentProduct, supplier: e.target.value})}>{suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></div>
+                </div>
+                
+                <div className="bg-pink-50 p-3 rounded-lg border border-pink-100">
+                    <label className="block text-sm font-bold text-pink-700 mb-1 flex items-center gap-2"><Footprints className="w-4 h-4"/> Gang / Laufweg-Nummer (Optional)</label>
+                    <input type="text" placeholder="z.B. 10, Kühlhaus, Regal A..." className="w-full p-2 border border-pink-200 rounded" value={currentProduct.aisle || ''} onChange={e => setCurrentProduct({...currentProduct, aisle: e.target.value})} />
+                    <p className="text-xs text-pink-600 mt-1">Gleiche Bezeichnung = Gleiche Gruppe im Einkaufswagen. Wenn leer = Kategorie-Name.</p>
+                </div>
+
+                {currentProduct.department === 'shisha' && (<div><label className="block text-sm font-medium text-slate-700 mb-1">SOLL-Bestand</label><input type="number" className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none" value={currentProduct.targetStock || 0} onChange={e => setCurrentProduct({...currentProduct, targetStock: parseInt(e.target.value) || 0})} /></div>)}
+                <div><label className="block text-sm font-medium mb-1">Interne Position (Liste)</label><input type="number" className="w-full border p-2 rounded" value={currentProduct.sortOrder} onChange={e => setCurrentProduct({...currentProduct, sortOrder: parseInt(e.target.value)})} /></div>
+                <div className="pt-4 flex gap-3"><button onClick={handleSave} className="flex-1 bg-pink-600 text-white p-2 rounded font-bold mt-4">Speichern</button></div>
+                </div>
+            </div>
+            );
         }
-        await batch.commit();
-        setIsEditing(false); setCurrentSup(null);
-      } catch (e) { alert("Fehler: " + e.message); }
-    };
-    const handleDelete = async (id) => { if (confirm("Löschen?")) try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'suppliers', id)); } catch (e) { alert("Fehler"); } };
-    
-    const handleDragStart = (e, index) => {
-        setDraggedIndex(index);
-        e.dataTransfer.effectAllowed = "move";
-    };
 
-    const handleDragOver = (e, index) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-    };
+        return (
+            <div className="space-y-4">
+            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                <div className="relative w-full md:w-64"><Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" /><input className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none" placeholder="Artikel suchen..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
+                <div className="flex gap-2 w-full md:w-auto items-center">
+                    <div className="relative"><Filter className="absolute left-3 top-3 w-4 h-4 text-slate-500" /><select className="pl-9 pr-8 py-2 bg-white border rounded text-sm appearance-none font-medium" value={filterDept} onChange={handleDeptChange}><option value="all">Alle Abt.</option><option value="kitchen">Küche</option><option value="bar">Bar</option><option value="shisha">Shisha</option></select></div>
+                    <div className="relative"><Tag className="absolute left-3 top-3 w-4 h-4 text-slate-500" /><select className="pl-9 pr-8 py-2 bg-white border rounded text-sm appearance-none font-medium max-w-[150px]" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}><option value="all">Alle Kat.</option>{visibleCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                    
+                    {/* NEU: Download Button */}
+                    <button onClick={exportProductsToCSV} className="flex items-center gap-2 px-4 py-2 bg-slate-200 rounded text-sm font-bold text-slate-700 hover:bg-slate-300" title="Backup herunterladen"><Download className="w-4 h-4" /></button>
+                    <button onClick={() => setIsImporting(!isImporting)} className="flex items-center gap-2 px-4 py-2 bg-slate-200 rounded text-sm font-bold"><Upload className="w-4 h-4" /></button>
+                    <button onClick={handleAddNew} className="flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded text-sm font-bold"><Plus className="w-4 h-4" /></button>
+                </div>
+            </div>
 
-    const handleDrop = async (e, targetIndex) => {
-        e.preventDefault();
-        if (draggedIndex === null || draggedIndex === targetIndex) return;
+            {isImporting && (
+                <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
+                    <h4 className="font-bold text-blue-800 mb-2 flex gap-2"><FileSpreadsheet className="w-5 h-5"/> CSV Import (Alle Abteilungen)</h4>
+                    <div className="mb-4 text-sm text-blue-800 bg-blue-100 p-3 rounded">
+                        Bitte eine CSV-Datei mit folgenden Spalten (ohne Überschrift) hochladen:
+                        <div className="font-mono mt-1 font-bold">Name, Einheit, Abteilung, Kategorie, Lieferant</div>
+                        <div className="mt-2 text-xs">Beispiel: <span className="italic">Cola, Kiste, Bar, Softdrinks, Hamberger</span></div>
+                        <div className="mt-1 text-xs text-blue-600">Optional: ...; Gang; Position; Soll-Bestand (für Backup)</div>
+                    </div>
+                    <input type="file" accept=".csv" onChange={handleFileUpload} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                </div>
+            )}
 
-        const newSuppliers = [...suppliers];
-        const [movedItem] = newSuppliers.splice(draggedIndex, 1);
-        newSuppliers.splice(targetIndex, 0, movedItem);
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                {products.length === 0 ? <div className="p-8 text-center text-slate-500"><p className="mb-2">Noch keine Artikel vorhanden.</p><p className="text-sm">Du kannst deine CSV neu importieren.</p></div> : 
+                <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 border-b"><tr>
+                    <th className="px-4 py-3 w-10 text-center"><input type="checkbox" onChange={handleSelectAll} checked={selectedProducts.length === sortedProducts.length && sortedProducts.length > 0} className="w-4 h-4 rounded text-pink-600"/></th>
+                    <th className="px-2 py-3 w-10"></th>
+                    <th className="px-4 py-3">Name</th><th className="px-4 py-3">Abt.</th><th className="px-4 py-3">Lieferant</th><th className="px-4 py-3">Kategorie</th><th className="px-4 py-3 w-20 text-center">Gang</th><th className="px-4 py-3 text-right"></th></tr></thead><tbody className="divide-y">{sortedProducts.map((p, idx) => (
+                        <tr 
+                            key={p.id} 
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, p.id)}
+                            onDragOver={handleDragOver}
+                            onDrop={(e) => handleDrop(e, p.id)}
+                            className={`hover:bg-slate-50 cursor-grab active:cursor-grabbing ${draggedProdId === p.id ? 'bg-pink-50' : ''}`}
+                        >
+                            <td className="px-4 py-3 text-center"><input type="checkbox" checked={selectedProducts.includes(p.id)} onChange={() => toggleSelection(p.id)} className="w-4 h-4 rounded text-pink-600"/></td>
+                            <td className="px-2 py-3 text-center"><GripVertical className="w-4 h-4 text-slate-300 mx-auto"/></td>
+                            <td className="px-4 py-3 font-bold">{p.name} <span className="text-xs font-normal text-slate-400">{p.unit}</span></td><td className="px-4 py-3"><span className={`px-2 py-1 rounded text-xs font-bold ${p.department === 'bar' ? 'bg-purple-100 text-purple-700' : p.department === 'shisha' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>{DEPT_NAMES[p.department]}</span></td><td className="px-4 py-3">{p.supplier}</td><td className="px-4 py-3 text-xs text-slate-500">{categories.find(c => c.id === p.category)?.name || '-'}</td><td className="px-4 py-3 text-center font-mono text-xs text-pink-600 font-bold bg-pink-50 rounded">{p.aisle || '-'}</td><td className="px-4 py-3 text-right"><button onClick={() => handleEdit(p)} className="p-2 bg-slate-100 rounded text-slate-600"><Edit2 className="w-4 h-4"/></button></td></tr>))}</tbody></table></div>
+                }
+            </div>
+            {selectedProducts.length > 0 && (<div className="fixed bottom-6 left-0 right-0 px-4"><div className="max-w-xl mx-auto bg-white border border-red-100 shadow-2xl rounded-xl p-4 flex justify-between items-center"><span className="font-bold text-slate-700">{selectedProducts.length} ausgewählt</span><div className="flex gap-2"><button onClick={() => setSelectedProducts([])} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded">Abbrechen</button><button onClick={handleDeleteSelected} className="px-4 py-2 bg-red-600 text-white rounded font-bold flex gap-2"><Trash2 className="w-4 h-4"/> Löschen</button></div></div></div>)}
+            </div>
+        );
+        };
 
-        const batch = writeBatch(db);
-        newSuppliers.forEach((sup, idx) => {
-            const newSortOrder = (idx + 1) * 10; 
-            if (sup.sortOrder !== newSortOrder) {
-                batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'suppliers', sup.id), { sortOrder: newSortOrder });
+        const StatisticsView = ({ orders, onPrint }) => { return <div className="p-8 text-center text-slate-500">Statistik Modul aktiv</div>; }; 
+
+        // --- FIX: Missing component stub based on usage in OfficeView ---
+        const StatsPrintView = ({ data, onClose }) => { return <div className="p-8 text-center text-slate-500">Statistik Druckansicht (Platzhalter)</div>; };
+
+        const OrderPrintView = ({ data, onClose, supplierDetails }) => {
+        const currentSup = supplierDetails.find(s => s.name === data.supplier) || {};
+        
+        // Sammle alle Notizen aus den Items
+        const collectedNotes = [];
+        const processedOrders = new Set();
+        
+        data.items.forEach(item => {
+            if (item.originOrderId && item.originNote && !processedOrders.has(item.originOrderId)) {
+            processedOrders.add(item.originOrderId);
+            collectedNotes.push(`${DEPT_NAMES[item.originDept] || item.originDept}: ${item.originNote}`);
             }
         });
 
-        try {
-            await batch.commit();
-        } catch (error) {
-            console.error("Fehler beim Sortieren:", error);
-            alert("Fehler beim Verschieben.");
-        }
-        setDraggedIndex(null);
-    };
-
-    if (isEditing) return (<div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between mb-6"><h2 className="text-xl font-bold">Lieferant bearbeiten</h2><button onClick={() => setIsEditing(false)}><X/></button></div><div className="space-y-4"><input className="w-full border p-2 rounded" value={currentSup.name} onChange={e=>setCurrentSup({...currentSup, name: e.target.value})} placeholder="Name"/><input className="w-full border p-2 rounded" value={currentSup.phone} onChange={e=>setCurrentSup({...currentSup, phone: e.target.value})} placeholder="Telefon"/><input className="w-full border p-2 rounded" value={currentSup.email} onChange={e=>setCurrentSup({...currentSup, email: e.target.value})} placeholder="Email"/><div className="grid grid-cols-2 gap-4"><input className="border p-2 rounded" value={currentSup.customerNumber||''} onChange={e=>setCurrentSup({...currentSup, customerNumber: e.target.value})} placeholder="Kd-Nr"/><input className="border p-2 rounded" value={currentSup.ourName||''} onChange={e=>setCurrentSup({...currentSup, ourName: e.target.value})} placeholder="Unser Name"/></div><div className="flex gap-4"><button onClick={()=>setCurrentSup({...currentSup, orderMethod:'direct'})} className={`flex-1 p-3 border rounded ${currentSup.orderMethod==='direct'?'bg-pink-50 border-pink-500':''}`}>
-        <FileText className="w-5 h-5"/>
-        <span className="text-xs font-bold">Direkt (PDF)</span>
-    </button><button onClick={()=>setCurrentSup({...currentSup, orderMethod:'shopping'})} className={`flex-1 p-3 border rounded ${currentSup.orderMethod==='shopping'?'bg-pink-50 border-pink-500':''}`}>
-        <ShoppingCart className="w-5 h-5"/>
-        <span className="text-xs font-bold">Einkaufsliste</span>
-    </button></div><button onClick={handleSave} className="w-full bg-pink-600 text-white p-2 rounded font-bold">Speichern</button></div></div>);
-    
-    return (<div className="space-y-4"><div className="flex justify-between items-center"><h3 className="font-bold text-slate-700">Lieferanten</h3><button onClick={handleAddNew} className="flex items-center gap-2 px-3 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg text-sm font-bold"><Plus className="w-4 h-4"/> Neu</button></div>
-    
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {suppliers.map((sup, idx) => (
-            <div 
-                key={sup.id} 
-                draggable
-                onDragStart={(e) => handleDragStart(e, idx)}
-                onDragOver={(e) => handleDragOver(e, idx)}
-                onDrop={(e) => handleDrop(e, idx)}
-                className={`p-4 bg-white border border-slate-200 rounded-xl shadow-sm transition-all ${draggedIndex === idx ? 'opacity-50 ring-2 ring-pink-300' : 'hover:shadow-md'}`}
-            >
-                <div className="flex justify-between items-start mb-2">
-                    <div className="font-bold text-slate-800 text-lg flex items-center gap-2 cursor-grab active:cursor-grabbing">
-                        <GripVertical className="w-4 h-4 text-slate-400" />
-                        {sup.name}
-                    </div>
-                    <button onClick={() => handleEdit(sup)} className="text-slate-400 hover:text-slate-600"><Edit2 className="w-4 h-4"/></button>
-                </div>
-                <div className="text-sm text-slate-500 space-y-1 ml-6">
-                    {sup.phone && <div className="flex items-center gap-2"><Phone className="w-3 h-3"/> {sup.phone}</div>}
-                    <div className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${sup.orderMethod === 'shopping' ? 'bg-orange-500' : 'bg-blue-500'}`}></span> {sup.orderMethod === 'shopping' ? 'Einkauf' : 'PDF Bestellung'}</div>
-                </div>
-            </div>
-        ))}
-    </div>
-    </div>);
-};
-
-const ProductManager = ({ products, categories, suppliers, appId }) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const [currentProduct, setCurrentProduct] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterDept, setFilterDept] = useState('all');
-  const [filterCategory, setFilterCategory] = useState('all');
-  const [isImporting, setIsImporting] = useState(false);
-  const [importTarget, setImportTarget] = useState('shisha'); 
-  const [selectedProducts, setSelectedProducts] = useState([]);
-  
-  // Drag state for products
-  const [draggedProdId, setDraggedProdId] = useState(null);
-  
-  const emptyProduct = { name: '', unit: 'Stk', category: '', supplier: '', department: 'kitchen', targetStock: 0, sortOrder: 100, aisle: '' };
-
-  const handleEdit = (product) => { setCurrentProduct({ ...product }); setIsEditing(true); };
-  
-  const getCategoriesForDept = (dept) => {
-      return categories.filter(c => Array.isArray(c.allowedRoles) && c.allowedRoles.includes(dept));
-  };
-
-  const handleAddNew = () => { 
-      const defaultDept = filterDept !== 'all' ? filterDept : 'kitchen';
-      const validCats = getCategoriesForDept(defaultDept);
-      const defaultCat = validCats.length > 0 ? validCats[0].id : '';
-      const defaultSup = suppliers.length > 0 ? suppliers[0].name : '';
-
-      setCurrentProduct({ 
-          ...emptyProduct, 
-          department: defaultDept,
-          category: defaultCat, 
-          supplier: defaultSup
-      }); 
-      setIsEditing(true); 
-  };
-  
-  const handleEditDepartmentChange = (e) => {
-      const newDept = e.target.value;
-      const validCats = getCategoriesForDept(newDept);
-      const newCat = validCats.length > 0 ? validCats[0].id : '';
-      setCurrentProduct({ ...currentProduct, department: newDept, category: newCat });
-  };
-
-  const handleSave = async () => {
-    if (!currentProduct.name) return alert("Bitte Name");
-    try {
-      let productToSave = { ...currentProduct };
-      
-      const validCats = getCategoriesForDept(productToSave.department);
-      if (productToSave.category && !validCats.some(c => c.id === productToSave.category)) {
-          productToSave.category = validCats.length > 0 ? validCats[0].id : '';
-      }
-      
-      if (!productToSave.supplier && suppliers.length > 0) productToSave.supplier = suppliers[0].name;
-
-      if (productToSave.id) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', productToSave.id), productToSave);
-      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'products'), productToSave);
-      setIsEditing(false); setCurrentProduct(null);
-    } catch (e) { alert("Fehler"); }
-  };
-
-  const toggleSelection = (id) => { setSelectedProducts(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]); };
-  
-  const handleSelectAll = (e) => {
-      if (e.target.checked) {
-          setSelectedProducts(sortedProducts.map(p => p.id));
-      } else {
-          setSelectedProducts([]);
-      }
-  };
-
-  const handleDeleteSelected = async () => {
-    if (selectedProducts.length === 0 || !confirm(`${selectedProducts.length} Artikel löschen?`)) return;
-    const batch = writeBatch(db);
-    selectedProducts.forEach(id => {
-        batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'products', id));
-    });
-    try { await batch.commit(); setSelectedProducts([]); alert("Gelöscht."); } catch(e) { alert("Fehler: " + e.message); }
-  };
-
-  const handleDragStart = (e, id) => {
-      setDraggedProdId(id);
-      e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleDragOver = (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-  };
-
-  const handleDrop = async (e, targetId) => {
-      e.preventDefault();
-      if (!draggedProdId || draggedProdId === targetId) return;
-
-      const draggedIndex = sortedProducts.findIndex(p => p.id === draggedProdId);
-      const targetIndex = sortedProducts.findIndex(p => p.id === targetId);
-
-      if (draggedIndex === -1 || targetIndex === -1) return;
-
-      const newList = [...sortedProducts];
-      const [movedItem] = newList.splice(draggedIndex, 1);
-      newList.splice(targetIndex, 0, movedItem);
-
-      const batch = writeBatch(db);
-      newList.forEach((prod, idx) => {
-          const newSortOrder = (idx + 1) * 10;
-          if (prod.sortOrder !== newSortOrder) {
-              batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', prod.id), { sortOrder: newSortOrder });
-          }
-      });
-
-      try {
-          await batch.commit();
-      } catch (error) {
-          console.error("Fehler beim Sortieren:", error);
-          alert("Fehler beim Verschieben.");
-      }
-      setDraggedProdId(null);
-  };
-
-
-  const exportProductsToCSV = () => {
-      if (products.length === 0) return alert("Keine Artikel vorhanden.");
-      let csvContent = "\uFEFFName;Einheit;Abteilung;Kategorie;Lieferant;Gang;Position;Soll-Bestand\n";
-      const getDeptName = (d) => { if(d === 'kitchen') return 'Küche'; if(d === 'bar') return 'Bar'; if(d === 'shisha') return 'Shisha'; return d; };
-
-      products.forEach(p => {
-          const catName = categories.find(c => c.id === p.category)?.name || '';
-          const cleanName = p.name.replace(/;/g, ",");
-          const row = [cleanName, p.unit || '', getDeptName(p.department), catName, p.supplier || '', p.aisle || '', p.sortOrder || '', p.targetStock || ''].join(';');
-          csvContent += row + "\n";
-      });
-      const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", "mabelle_artikel_backup.csv");
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-  };
-
-  const handleFileUpload = (event) => {
-      const file = event.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-          const text = e.target.result;
-          const rows = text.split('\n');
-          const batch = writeBatch(db);
-          let count = 0;
-          const startIdx = rows[0].toLowerCase().includes('name') ? 1 : 0;
-
-          for (let i = startIdx; i < rows.length; i++) {
-              const row = rows[i].trim(); 
-              if(!row) continue;
-              const cols = row.includes(';') ? row.split(';') : row.split(',');
-              if(cols.length < 1) continue;
-              
-              const name = cols[0]?.trim();
-              if(!name) continue; 
-
-              const unit = cols[1]?.trim() || 'Stk';
-              const deptRaw = cols[2]?.trim().toLowerCase() || 'kitchen'; 
-              const catName = cols[3]?.trim() || '';
-              const supplier = cols[4]?.trim() || 'Unbekannt';
-              
-              const aisle = cols[5]?.trim() || '';
-              const sortOrder = cols[6] ? parseInt(cols[6].trim()) : 100 + i;
-              const targetStock = cols[7] ? parseInt(cols[7].trim()) : 0;
-
-              let department = 'kitchen';
-              if (deptRaw.includes('bar')) department = 'bar';
-              else if (deptRaw.includes('shisha')) department = 'shisha';
-              else if (deptRaw.includes('küche') || deptRaw.includes('kitchen')) department = 'kitchen';
-
-              let category = '';
-              if (catName) {
-                  const foundCat = categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
-                  if (foundCat) category = foundCat.id;
-              }
-              
-              const docRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'products'));
-              batch.set(docRef, { name, unit, department, category, supplier, targetStock, sortOrder, aisle });
-              count++;
-          }
-          try { await batch.commit(); alert(`${count} Artikel importiert.`); setIsImporting(false); } catch(e) { alert("Fehler beim Import: " + e.message); }
-      };
-      reader.readAsText(file);
-  };
-
-  const handleDeptChange = (e) => {
-      setFilterDept(e.target.value);
-      setFilterCategory('all');
-  };
-
-  const filteredProducts = products.filter(p => {
-      const matchSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.supplier.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchDept = filterDept === 'all' || p.department === filterDept;
-      const matchCat = filterCategory === 'all' || p.category === filterCategory;
-      return matchSearch && matchDept && matchCat;
-  });
-
-  const sortedProducts = [...filteredProducts].sort((a, b) => {
-    // 1. Priorität: Aisle/Gang
-    const aisleA = a.aisle ? a.aisle.toString().toLowerCase() : 'zzz';
-    const aisleB = b.aisle ? b.aisle.toString().toLowerCase() : 'zzz';
-    
-    if (aisleA !== aisleB) return aisleA.localeCompare(aisleB, undefined, { numeric: true, sensitivity: 'base' });
-
-    // 2. Priorität: Manuelle Sortierung
-    const orderA = a.sortOrder !== undefined ? parseInt(a.sortOrder) : 9999;
-    const orderB = b.sortOrder !== undefined ? parseInt(b.sortOrder) : 9999;
-    if (orderA !== orderB) return orderA - orderB;
-    
-    // 3. Name
-    return a.name.localeCompare(b.name);
-  });
-
-  const moveProduct = async (index, direction) => {
-    if (index + direction < 0 || index + direction >= sortedProducts.length) return;
-    const itemA = sortedProducts[index]; 
-    const itemB = sortedProducts[index + direction];
-    
-    let valA = itemB.sortOrder || 100;
-    let valB = itemA.sortOrder || 100;
-
-    if (valA === valB) {
-        if (direction === -1) { 
-            valA = valB - 5; 
-            valB = valB + 5;
-        } else {
-            valA = valB + 5;
-            valB = valB - 5;
-        }
-    }
-
-    const batch = writeBatch(db);
-    batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', itemA.id), { sortOrder: valA });
-    batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', itemB.id), { sortOrder: valB });
-    try { await batch.commit(); } catch(e) {}
-  };
-
-  const visibleCategories = categories.filter(c => {
-      if (filterDept === 'all') return true;
-      return c.allowedRoles?.includes(filterDept);
-  });
-
-  if (isEditing) {
-    const availableCategories = getCategoriesForDept(currentProduct.department);
-    return (
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-        <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold text-slate-800">Artikel bearbeiten</h2><button onClick={() => setIsEditing(false)}><X/></button></div>
-        <div className="grid gap-4 max-w-xl">
-          <div><label className="block text-sm font-medium mb-1">Name</label><input className="w-full border p-2 rounded" value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} /></div>
-          <div className="grid grid-cols-2 gap-4">
-              <div><label className="block text-sm font-medium mb-1">Einheit</label><input className="w-full border p-2 rounded" value={currentProduct.unit} onChange={e => setCurrentProduct({...currentProduct, unit: e.target.value})} /></div>
-              <div>
-                  <label className="block text-sm font-medium mb-1">Abteilung</label>
-                  <select className="w-full border p-2 rounded" value={currentProduct.department} onChange={handleEditDepartmentChange}>
-                      <option value="kitchen">Küche</option><option value="bar">Bar</option><option value="shisha">Shisha</option>
-                  </select>
-              </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-             <div>
-                 <label className="block text-sm font-medium mb-1">Kategorie</label>
-                 <select className="w-full border p-2 rounded" value={currentProduct.category} onChange={e => setCurrentProduct({...currentProduct, category: e.target.value})}>
-                     {availableCategories.length > 0 ? availableCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>) : <option value="">Keine Kategorien</option>}
-                 </select>
-             </div>
-             <div><label className="block text-sm font-medium mb-1">Lieferant</label><select className="w-full border p-2 rounded" value={currentProduct.supplier} onChange={e => setCurrentProduct({...currentProduct, supplier: e.target.value})}>{suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></div>
-          </div>
-          
-          <div className="bg-pink-50 p-3 rounded-lg border border-pink-100">
-              <label className="block text-sm font-bold text-pink-700 mb-1 flex items-center gap-2"><Footprints className="w-4 h-4"/> Gang / Laufweg-Nummer (Optional)</label>
-              <input type="text" placeholder="z.B. 10, Kühlhaus, Regal A..." className="w-full p-2 border border-pink-200 rounded" value={currentProduct.aisle || ''} onChange={e => setCurrentProduct({...currentProduct, aisle: e.target.value})} />
-              <p className="text-xs text-pink-600 mt-1">Gleiche Bezeichnung = Gleiche Gruppe im Einkaufswagen. Wenn leer = Kategorie-Name.</p>
-          </div>
-
-          {currentProduct.department === 'shisha' && (<div><label className="block text-sm font-medium text-slate-700 mb-1">SOLL-Bestand</label><input type="number" className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none" value={currentProduct.targetStock || 0} onChange={e => setCurrentProduct({...currentProduct, targetStock: parseInt(e.target.value) || 0})} /></div>)}
-          <div><label className="block text-sm font-medium mb-1">Interne Position (Liste)</label><input type="number" className="w-full border p-2 rounded" value={currentProduct.sortOrder} onChange={e => setCurrentProduct({...currentProduct, sortOrder: parseInt(e.target.value)})} /></div>
-          <div className="pt-4 flex gap-3"><button onClick={handleSave} className="flex-1 bg-pink-600 text-white p-2 rounded font-bold mt-4">Speichern</button></div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-        <div className="relative w-full md:w-64"><Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" /><input className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none" placeholder="Artikel suchen..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
-        <div className="flex gap-2 w-full md:w-auto items-center">
-            <div className="relative"><Filter className="absolute left-3 top-3 w-4 h-4 text-slate-500" /><select className="pl-9 pr-8 py-2 bg-white border rounded text-sm appearance-none font-medium" value={filterDept} onChange={handleDeptChange}><option value="all">Alle Abt.</option><option value="kitchen">Küche</option><option value="bar">Bar</option><option value="shisha">Shisha</option></select></div>
-            <div className="relative"><Tag className="absolute left-3 top-3 w-4 h-4 text-slate-500" /><select className="pl-9 pr-8 py-2 bg-white border rounded text-sm appearance-none font-medium max-w-[150px]" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}><option value="all">Alle Kat.</option>{visibleCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-            
-            {/* NEU: Download Button */}
-            <button onClick={exportProductsToCSV} className="flex items-center gap-2 px-4 py-2 bg-slate-200 rounded text-sm font-bold text-slate-700 hover:bg-slate-300" title="Backup herunterladen"><Download className="w-4 h-4" /></button>
-            <button onClick={() => setIsImporting(!isImporting)} className="flex items-center gap-2 px-4 py-2 bg-slate-200 rounded text-sm font-bold"><Upload className="w-4 h-4" /></button>
-            <button onClick={handleAddNew} className="flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded text-sm font-bold"><Plus className="w-4 h-4" /></button>
-        </div>
-      </div>
-
-      {isImporting && (
-          <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
-              <h4 className="font-bold text-blue-800 mb-2 flex gap-2"><FileSpreadsheet className="w-5 h-5"/> CSV Import (Alle Abteilungen)</h4>
-              <div className="mb-4 text-sm text-blue-800 bg-blue-100 p-3 rounded">
-                  Bitte eine CSV-Datei mit folgenden Spalten (ohne Überschrift) hochladen:
-                  <div className="font-mono mt-1 font-bold">Name, Einheit, Abteilung, Kategorie, Lieferant</div>
-                  <div className="mt-2 text-xs">Beispiel: <span className="italic">Cola, Kiste, Bar, Softdrinks, Hamberger</span></div>
-                  <div className="mt-1 text-xs text-blue-600">Optional: ...; Gang; Position; Soll-Bestand (für Backup)</div>
-              </div>
-              <input type="file" accept=".csv" onChange={handleFileUpload} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
-          </div>
-      )}
-
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        {products.length === 0 ? <div className="p-8 text-center text-slate-500"><p className="mb-2">Noch keine Artikel vorhanden.</p><p className="text-sm">Du kannst deine CSV neu importieren.</p></div> : 
-        <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 border-b"><tr>
-            <th className="px-4 py-3 w-10 text-center"><input type="checkbox" onChange={handleSelectAll} checked={selectedProducts.length === sortedProducts.length && sortedProducts.length > 0} className="w-4 h-4 rounded text-pink-600"/></th>
-            <th className="px-2 py-3 w-10"></th>
-            <th className="px-4 py-3">Name</th><th className="px-4 py-3">Abt.</th><th className="px-4 py-3">Lieferant</th><th className="px-4 py-3">Kategorie</th><th className="px-4 py-3 w-20 text-center">Gang</th><th className="px-4 py-3 text-right"></th></tr></thead><tbody className="divide-y">{sortedProducts.map((p, idx) => (
-                <tr 
-                    key={p.id} 
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, p.id)}
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, p.id)}
-                    className={`hover:bg-slate-50 cursor-grab active:cursor-grabbing ${draggedProdId === p.id ? 'bg-pink-50' : ''}`}
-                >
-                    <td className="px-4 py-3 text-center"><input type="checkbox" checked={selectedProducts.includes(p.id)} onChange={() => toggleSelection(p.id)} className="w-4 h-4 rounded text-pink-600"/></td>
-                    <td className="px-2 py-3 text-center"><GripVertical className="w-4 h-4 text-slate-300 mx-auto"/></td>
-                    <td className="px-4 py-3 font-bold">{p.name} <span className="text-xs font-normal text-slate-400">{p.unit}</span></td><td className="px-4 py-3"><span className={`px-2 py-1 rounded text-xs font-bold ${p.department === 'bar' ? 'bg-purple-100 text-purple-700' : p.department === 'shisha' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>{DEPT_NAMES[p.department]}</span></td><td className="px-4 py-3">{p.supplier}</td><td className="px-4 py-3 text-xs text-slate-500">{categories.find(c => c.id === p.category)?.name || '-'}</td><td className="px-4 py-3 text-center font-mono text-xs text-pink-600 font-bold bg-pink-50 rounded">{p.aisle || '-'}</td><td className="px-4 py-3 text-right"><button onClick={() => handleEdit(p)} className="p-2 bg-slate-100 rounded text-slate-600"><Edit2 className="w-4 h-4"/></button></td></tr>))}</tbody></table></div>
-        }
-      </div>
-      {selectedProducts.length > 0 && (<div className="fixed bottom-6 left-0 right-0 px-4"><div className="max-w-xl mx-auto bg-white border border-red-100 shadow-2xl rounded-xl p-4 flex justify-between items-center"><span className="font-bold text-slate-700">{selectedProducts.length} ausgewählt</span><div className="flex gap-2"><button onClick={() => setSelectedProducts([])} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded">Abbrechen</button><button onClick={handleDeleteSelected} className="px-4 py-2 bg-red-600 text-white rounded font-bold flex gap-2"><Trash2 className="w-4 h-4"/> Löschen</button></div></div></div>)}
-    </div>
-  );
-};
-
-const StatisticsView = ({ orders, onPrint }) => { return <div className="p-8 text-center text-slate-500">Statistik Modul aktiv</div>; }; 
-
-// --- FIX: Missing component stub based on usage in OfficeView ---
-const StatsPrintView = ({ data, onClose }) => { return <div className="p-8 text-center text-slate-500">Statistik Druckansicht (Platzhalter)</div>; };
-
-const OrderPrintView = ({ data, onClose, supplierDetails }) => {
-  const currentSup = supplierDetails.find(s => s.name === data.supplier) || {};
-  
-  // Sammle alle Notizen aus den Items
-  const collectedNotes = [];
-  const processedOrders = new Set();
-  
-  data.items.forEach(item => {
-    if (item.originOrderId && item.originNote && !processedOrders.has(item.originOrderId)) {
-      processedOrders.add(item.originOrderId);
-      collectedNotes.push(`${DEPT_NAMES[item.originDept] || item.originDept}: ${item.originNote}`);
-    }
-  });
-
-  return (
-    <div className="fixed inset-0 z-50 bg-white overflow-auto p-4 sm:p-8">
-      <div className="max-w-[210mm] mx-auto bg-white min-h-screen">
-        <div className="flex justify-between items-center mb-6 print:hidden border-b pb-4"><h2 className="text-xl font-bold">Druckvorschau</h2><div className="flex gap-2"><button onClick={() => window.print()} className="bg-pink-600 text-white px-4 py-2 rounded flex gap-2"><Printer className="w-4 h-4"/> Drucken</button><button onClick={onClose} className="bg-slate-200 px-4 py-2 rounded">Schließen</button></div></div>
-        <div className="font-sans text-sm">
-            <div className="flex justify-between items-start mb-6 border-b-2 border-black pb-4">
-                <div>
-                    <div className="text-2xl font-bold">{data.supplier}</div>
-                    {currentSup.customerNumber && <div>Kd-Nr: {currentSup.customerNumber}</div>}
-                    {currentSup.ourName && <div>Besteller: {currentSup.ourName}</div>}
-                </div>
-                <div className="text-right">
-                    <div className="text-lg font-bold">{formatDate(data.date)}</div>
-                    <div className="text-base text-gray-500">{formatTime(data.date)} Uhr</div>
-                    <div className="text-xs text-gray-400 mt-1">ID: {data.orderId ? data.orderId.slice(0,6) : 'SAMMEL'}</div>
-                </div>
-            </div>
-            
-            {/* Zeige entweder die übergebene Notiz (einzeln) oder die gesammelten (sammel) */}
-            {(data.note || collectedNotes.length > 0) && (
-              <div className="mb-4 p-3 border border-black bg-gray-50 rounded">
-                <span className="font-bold text-xs uppercase block mb-1">Notizen:</span> 
-                {data.note && <div className="mb-1">{data.note}</div>}
-                {collectedNotes.map((note, idx) => (
-                  <div key={idx} className="font-medium text-sm border-l-2 border-slate-400 pl-2 mb-1">{note}</div>
-                ))}
-              </div>
-            )}
-            
-            <table className="w-full text-left border-collapse">
-                <thead><tr className="border-b-2 border-black"><th className="py-1 w-3/4">Artikel</th><th className="py-1 w-1/4 text-right">Menge</th><th className="py-1 w-12 pl-2"></th></tr></thead>
-                <tbody>{data.items.map((item, i) => (<tr key={i} className="border-b border-gray-300"><td className="py-1 align-middle text-base font-medium">{item.name}</td><td className="py-1 text-right text-xl font-bold align-middle">{item.quantity}</td><td className="py-1 pl-2 align-middle text-sm">{item.unit}</td></tr>))}</tbody>
-            </table>
-        </div>
-      </div>
-      <style>{`@media print { body * { visibility: hidden; } .fixed.inset-0.z-50.bg-white.overflow-auto * { visibility: visible; } .fixed.inset-0.z-50.bg-white.overflow-auto { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; } .print\\:hidden { display: none !important; } }`}</style>
-    </div>
-  );
-};
-
-const ShoppingMode = ({ items, supplier, onClose, onComplete, categories }) => {
-  const [activeItemIds, setActiveItemIds] = useState(items ? items.map((_, i) => i) : []); 
-  const [showDone, setShowDone] = useState(false);
-  
-  if (!items) return null;
-
-  // Sammle Notizen für den Kopfbereich
-  const collectedNotes = [];
-  const processedOrders = new Set();
-  items.forEach(item => {
-    if (item.originOrderId && item.originNote && !processedOrders.has(item.originOrderId)) {
-      processedOrders.add(item.originOrderId);
-      collectedNotes.push({ dept: item.originDept, note: item.originNote });
-    }
-  });
-
-  const visibleItems = items.map((item, index) => ({ ...item, originalIndex: index }))
-                            .filter(item => showDone || activeItemIds.includes(item.originalIndex));
-
-  const toggleItem = (originalIndex) => { 
-      if (activeItemIds.includes(originalIndex)) { 
-          setActiveItemIds(prev => prev.filter(id => id !== originalIndex)); 
-      } else { 
-          setActiveItemIds(prev => [...prev, originalIndex]); 
-      } 
-  };
-  
-  const activeCount = activeItemIds.length;
-  const totalCount = items.length;
-  const progress = totalCount > 0 ? ((totalCount - activeCount) / totalCount) * 100 : 0;
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-100 flex flex-col h-screen animate-in slide-in-from-bottom duration-300">
-      <div className="bg-white p-4 shadow-sm border-b border-slate-200 flex items-center justify-between shrink-0"><button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full"><ArrowLeft className="w-6 h-6 text-slate-600" /></button><div className="text-center"><h2 className="font-bold text-slate-800">{supplier}</h2><p className="text-xs text-slate-500">{activeCount} offen</p></div><div className="w-10"></div></div>
-      <div className="h-2 bg-slate-200 w-full shrink-0"><div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${progress}%` }}></div></div>
-      
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-32">
-          
-          {/* Notizen Bereich */}
-          {collectedNotes.length > 0 && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 mx-2">
-              <h4 className="text-xs font-bold text-yellow-800 uppercase mb-1 flex items-center gap-1"><MessageSquare className="w-3 h-3"/> Wichtige Hinweise:</h4>
-              <div className="space-y-1">
-                {collectedNotes.map((n, i) => (
-                  <div key={i} className="text-sm text-yellow-900"><span className="font-bold">{DEPT_NAMES[n.dept] || n.dept}:</span> {n.note}</div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {visibleItems.map((item, index) => { 
-              const originalIndex = item.originalIndex;
-              const isActive = activeItemIds.includes(originalIndex); 
-              
-              const prevItem = index > 0 ? visibleItems[index - 1] : null;
-              
-              let showHeader = false;
-              let headerTitle = "";
-              let isAisleHeader = false;
-              
-              const getEffectiveAisleName = (itm) => {
-                  if (itm.aisle) return itm.aisle;
-                  const cat = categories?.find(c => c.id === itm.category);
-                  return cat ? cat.name : 'Sonstiges';
-              };
-
-              const currentHeaderName = getEffectiveAisleName(item);
-              const prevHeaderName = prevItem ? getEffectiveAisleName(prevItem) : null;
-
-              if (currentHeaderName !== prevHeaderName) {
-                  showHeader = true;
-                  const isNumeric = /^\d+$/.test(currentHeaderName);
-                  
-                  if (item.aisle) {
-                      headerTitle = isNumeric ? `GANG ${currentHeaderName}` : currentHeaderName;
-                      isAisleHeader = true;
-                  } else {
-                      headerTitle = currentHeaderName;
-                      isAisleHeader = false;
-                  }
-              }
-
-              return (
-                <React.Fragment key={originalIndex}>
-                  {showHeader && (
-                      <div className={`px-4 py-2 mt-6 first:mt-2 text-sm font-bold uppercase tracking-wider rounded-lg mx-2 flex items-center gap-2 shadow-sm ${isAisleHeader ? 'bg-slate-800 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                        {isAisleHeader ? <Footprints className="w-4 h-4 text-pink-400"/> : <Layers className="w-4 h-4 text-blue-400"/>}
-                        {headerTitle}
-                      </div>
-                  )}
-                  
-                  <div onClick={() => toggleItem(originalIndex)} className={`p-4 rounded-xl shadow-sm border-2 cursor-pointer transition-all active:scale-95 flex justify-between items-center ${isActive ? 'bg-white border-white hover:border-pink-100' : 'bg-slate-100 border-transparent opacity-60 grayscale'}`}>
-                      <div className="flex items-center gap-4">
-                          <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors shrink-0 ${isActive ? 'border-slate-300 bg-white' : 'border-emerald-500 bg-emerald-500'}`}>{!isActive && <CheckCircle className="w-5 h-5 text-white" />}</div>
-                          <div>
-                              <span className={`text-lg font-bold block ${!isActive && 'line-through text-slate-500'}`}>{item.name}</span>
-                          </div>
-                      </div>
-                      <div className={`px-4 py-2 rounded-lg font-bold text-xl ${isActive ? 'bg-pink-50 text-pink-700' : 'bg-slate-200 text-slate-500 line-through'}`}>{item.quantity} <span className="text-sm font-normal">{item.unit}</span></div>
-                  </div>
-                </React.Fragment>
-              ); 
-          })}
-          
-          {activeCount === 0 && !showDone && (<div className="text-center py-20 text-slate-400 flex flex-col items-center"><div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-4"><CheckCircle className="w-10 h-10 text-emerald-600" /></div><h3 className="text-xl font-bold text-emerald-800">Alles erledigt!</h3></div>)}
-      </div>
-      <div className="p-4 bg-white border-t border-slate-200 shrink-0 safe-area-pb space-y-2 mb-8">{activeCount < totalCount && (<button onClick={() => onComplete(items)} className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 mb-2"><Archive className="w-5 h-5"/> Fertig & Archivieren</button>)}<button onClick={() => setShowDone(!showDone)} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-slate-500 font-medium hover:bg-slate-50 transition-colors">{showDone ? <><EyeOff className="w-4 h-4" /> Erledigte ausblenden</> : <><Eye className="w-4 h-4" /> Erledigte anzeigen ({totalCount - activeCount})</>}</button></div>
-    </div>
-  );
-};
-
-const RoleSelection = ({ onSelectRole, appId }) => {
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [pinInput, setPinInput] = useState("");
-  const [error, setError] = useState("");
-  const [currentPin, setCurrentPin] = useState(DEFAULT_PIN);
-  useEffect(() => { const fetchPin = async () => { try { const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'office_auth')); if (docSnap.exists()) setCurrentPin(docSnap.data().pin || DEFAULT_PIN); } catch(e) { console.error(e); } }; fetchPin(); }, [appId]);
-  const handleOfficeClick = () => { setShowPinModal(true); setError(""); setPinInput(""); };
-  const handleDigit = (digit) => { setPinInput(prev => prev + digit); setError(""); };
-  const handleClear = () => { setPinInput(prev => prev.slice(0, -1)); };
-  const handleEnter = () => { if (pinInput === currentPin) { onSelectRole('office'); } else { setError("Falsche PIN"); setPinInput(""); } };
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-      <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center"><h1 className="text-3xl font-bold text-slate-800 mb-1">MABELLE</h1><h2 className="text-sm font-bold text-pink-600 tracking-widest uppercase mb-8">Order System</h2>
-        <div className="grid grid-cols-1 gap-4">
-          <button onClick={() => onSelectRole('kitchen')} className="flex items-center gap-4 p-4 bg-white border border-slate-200 hover:border-pink-300 hover:bg-pink-50 rounded-xl group"><div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center"><ChefHat className="w-6 h-6 text-blue-600" /></div><div className="text-left"><h3 className="text-lg font-bold text-slate-800">Küche</h3><p className="text-xs text-slate-500">Lebensmittel & Co.</p></div></button>
-          <button onClick={() => onSelectRole('bar')} className="flex items-center gap-4 p-4 bg-white border border-slate-200 hover:border-pink-300 hover:bg-pink-50 rounded-xl group"><div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center"><Wine className="w-6 h-6 text-purple-600" /></div><div className="text-left"><h3 className="text-lg font-bold text-slate-800">Bar</h3><p className="text-xs text-slate-500">Getränke & Sirup</p></div></button>
-          <button onClick={() => onSelectRole('shisha')} className="flex items-center gap-4 p-4 bg-white border border-slate-200 hover:border-pink-300 hover:bg-pink-50 rounded-xl group"><div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center"><Cloud className="w-6 h-6 text-orange-600" /></div><div className="text-left"><h3 className="text-lg font-bold text-slate-800">Shisha</h3><p className="text-xs text-slate-500">Tabak & Kohle</p></div></button>
-          <div className="my-2 border-t border-slate-100"></div>
-          <button onClick={handleOfficeClick} className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 rounded-xl group"><div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center"><ClipboardList className="w-6 h-6 text-emerald-600" /></div><div className="text-left"><h3 className="text-lg font-bold text-slate-800">Büro</h3><p className="text-xs text-slate-500">Verwaltung & Einkauf</p></div></button>
-        </div>
-      </div>
-      {showPinModal && (<div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-sm flex flex-col items-center"><div className="flex justify-between items-center w-full mb-6"><h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Lock className="w-5 h-5 text-emerald-600"/> Büro Login</h3><button onClick={() => setShowPinModal(false)} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-5 h-5 text-slate-400"/></button></div><div className="w-full text-center text-4xl font-bold tracking-[0.5em] p-4 border-2 border-slate-200 rounded-xl bg-slate-50 mb-4 h-20 flex items-center justify-center text-slate-800">{pinInput.split('').map(() => '●').join('')}</div>{error && <p className="text-red-500 text-center mb-2 font-bold">{error}</p>}<Numpad onDigit={handleDigit} onClear={handleClear} onEnter={handleEnter} /></div></div>)}
-    </div>
-  );
-};
-
-const OrderEntryView = ({ user, appId, role, products, categories, onLogout }) => {
-  const [cart, setCart] = useState({}); 
-  const [shishaInventory, setShishaInventory] = useState({}); 
-  const [activeCategory, setActiveCategory] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [isReviewing, setIsReviewing] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [orderNote, setOrderNote] = useState("");
-
-  const allowedCategories = categories.filter(c => c.allowedRoles && c.allowedRoles.includes(role));
-  useEffect(() => { if (allowedCategories.length > 0 && !activeCategory) setActiveCategory(allowedCategories[0].id || allowedCategories[0].name.toLowerCase()); }, [role, categories]);
-
-  const updateQuantity = (itemId, delta) => { setCart(prev => { const val = Math.max(0, (prev[itemId] || 0) + delta); const n = { ...prev, [itemId]: val }; if (val === 0) delete n[itemId]; return n; }); };
-  const updateInventory = (itemId, val, target) => { const stock = parseInt(val); if (isNaN(stock)) { const n = {...shishaInventory}; delete n[itemId]; setShishaInventory(n); return; } setShishaInventory(prev => ({...prev, [itemId]: stock})); };
-  const getShishaOrderQty = (itemId, target) => { if (shishaInventory[itemId] === undefined) return 0; return Math.max(0, target - shishaInventory[itemId]); };
-
-  const filteredProducts = products.filter(p => { 
-      if (p.department !== role && p.department !== 'all') return false; 
-      if (!activeCategory) return false;
-      return (p.category === activeCategory) && (searchTerm === '' || p.name.toLowerCase().includes(searchTerm.toLowerCase()));
-  });
-
-  const handleSubmitOrder = async () => {
-    setIsSubmitting(true);
-    try {
-      let orderItems = [];
-      if (role === 'shisha') {
-          Object.keys(shishaInventory).forEach(id => {
-              const p = products.find(p => p.id === id);
-              const qty = getShishaOrderQty(id, p.targetStock);
-              if (qty > 0) orderItems.push({ productId: id, name: p.name, quantity: qty, unit: p.unit, category: p.category, supplier: p.supplier, currentStock: shishaInventory[id], targetStock: p.targetStock, department: 'shisha', aisle: p.aisle || '' });
-          });
-      } else {
-          orderItems = Object.entries(cart).map(([id, qty]) => { 
-              const p = products.find(p => p.id === id); 
-              return { productId: id, name: p.name, quantity: qty, unit: p.unit, category: p.category, supplier: p.supplier, aisle: p.aisle || '' }; 
-          });
-      }
-      if (orderItems.length === 0) { alert("Nichts zu bestellen."); setIsSubmitting(false); return; }
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), { 
-          items: orderItems, 
-          status: 'open', 
-          createdAt: serverTimestamp(), 
-          createdBy: user.uid, 
-          creatorName: `${DEPT_NAMES[role]} Team`, 
-          department: role, 
-          note: orderNote, 
-          completedSuppliers: [] 
-      });
-      setCart({}); setShishaInventory({}); setOrderNote(""); setIsReviewing(false); setShowSuccess(true); setTimeout(() => setShowSuccess(false), 3000);
-    } catch (e) { alert("Fehler"); } finally { setIsSubmitting(false); }
-  };
-
-  if (showSuccess) return (<div className="h-screen flex flex-col items-center justify-center bg-green-50"><CheckCircle className="w-16 h-16 text-green-600 mb-4"/><h2 className="text-2xl font-bold text-green-800">Gesendet!</h2></div>);
-
-  if (isReviewing) {
-      let reviewItems = [];
-      if (role === 'shisha') { Object.keys(shishaInventory).forEach(id => { const p = products.find(p => p.id === id); const qty = getShishaOrderQty(id, p.targetStock); if (qty > 0) reviewItems.push({ ...p, quantity: qty }); }); } 
-      else { reviewItems = Object.entries(cart).map(([id, qty]) => { const p = products.find(p => p.id === id); return { ...p, quantity: qty }; }); }
-      
-      return (
-        <div className="h-screen flex flex-col bg-white">
-            <div className="p-4 border-b flex gap-4 items-center"><button onClick={() => setIsReviewing(false)}><ArrowLeft/></button><span className="font-bold">Prüfen</span></div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {reviewItems.map(i => (<div key={i.id} className="flex justify-between p-4 border rounded-lg"><span>{i.name}</span><span className="font-bold">{i.quantity} {i.unit}</span></div>))}
-                <div className="mt-4"><label className="block text-sm font-bold mb-2">Notiz</label><textarea className="w-full border p-2 rounded" rows="3" value={orderNote} onChange={e => setOrderNote(e.target.value)} placeholder="Zusatzinfo..."></textarea></div>
-            </div>
-            <div className="p-4 border-t"><button onClick={handleSubmitOrder} disabled={isSubmitting} className="w-full bg-pink-600 text-white py-3 rounded-lg font-bold">Abschicken</button></div>
-        </div>
-      );
-  }
-
-  return (
-    <div className="h-screen flex flex-col bg-slate-50">
-        <div className="p-4 bg-white shadow-sm sticky top-0 z-10">
-            <div className="flex justify-between mb-4"><h1 className="text-xl font-bold capitalize">{role} Order</h1><button onClick={onLogout} className="text-red-500"><LogOut/></button></div>
-            {allowedCategories.length > 1 && (<div className="flex overflow-x-auto gap-2 pb-2 mb-2">{allowedCategories.map(c => <button key={c.id} onClick={() => setActiveCategory(c.id)} className={`px-4 py-2 rounded-full whitespace-nowrap ${activeCategory === c.id ? 'bg-pink-600 text-white' : 'bg-slate-100'}`}>{ICON_MAP[c.iconKey] || <Tag className="w-4 h-4"/>} <span className="font-medium">{c.name}</span></button>)}</div>)}
-            <div className="relative"><Search className="absolute left-3 top-3 w-4 h-4 text-slate-400"/><input className="w-full pl-9 pr-4 py-2 bg-slate-100 rounded-lg" placeholder="Suche..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-24">
-            {filteredProducts.map(p => {
-                if (role === 'shisha') {
-                    const current = shishaInventory[p.id] !== undefined ? shishaInventory[p.id] : '';
-                    return (
-                        <div key={p.id} className="p-4 bg-white rounded-xl shadow-sm border-l-4 border-slate-200">
-                            <div className="flex justify-between items-center mb-0"><div><div className="font-bold text-lg">{p.name}</div></div>
-                            <div className="flex items-center gap-2 justify-end">
-                                <button onClick={() => { const v = parseInt(current||0); if(v>0) updateInventory(p.id, (v-1).toString(), p.targetStock); }} className="w-10 h-10 bg-slate-100 rounded flex items-center justify-center"><Minus/></button>
-                                <input type="number" className="w-12 text-center text-xl font-bold bg-transparent" value={current} onChange={e => updateInventory(p.id, e.target.value, p.targetStock)} placeholder="0"/>
-                                <button onClick={() => { const v = parseInt(current||0); updateInventory(p.id, (v+1).toString(), p.targetStock); }} className="w-10 h-10 bg-slate-100 rounded flex items-center justify-center"><Plus/></button>
-                            </div></div>
+        return (
+            <div className="fixed inset-0 z-50 bg-white overflow-auto p-4 sm:p-8">
+            <div className="max-w-[210mm] mx-auto bg-white min-h-screen">
+                <div className="flex justify-between items-center mb-6 print:hidden border-b pb-4"><h2 className="text-xl font-bold">Druckvorschau</h2><div className="flex gap-2"><button onClick={() => window.print()} className="bg-pink-600 text-white px-4 py-2 rounded flex gap-2"><Printer className="w-4 h-4"/> Drucken</button><button onClick={onClose} className="bg-slate-200 px-4 py-2 rounded">Schließen</button></div></div>
+                <div className="font-sans text-sm">
+                    <div className="flex justify-between items-start mb-6 border-b-2 border-black pb-4">
+                        <div>
+                            <div className="text-2xl font-bold">{data.supplier}</div>
+                            {currentSup.customerNumber && <div>Kd-Nr: {currentSup.customerNumber}</div>}
+                            {currentSup.ourName && <div>Besteller: {currentSup.ourName}</div>}
                         </div>
-                    );
-                }
-                const qty = cart[p.id] || 0;
-                return (
-                    <div key={p.id} className={`flex justify-between items-center p-4 bg-white rounded-xl shadow-sm border-2 ${qty > 0 ? 'border-pink-500' : 'border-transparent'}`}>
-                        <div><div className="font-bold">{p.name}</div><div className="text-xs text-slate-500">{p.unit}</div></div>
-                        {qty === 0 ? (<button onClick={() => updateQuantity(p.id, 1)} className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-pink-600"><Plus/></button>) : (
-                            <div className="flex items-center bg-pink-50 rounded-full"><button onClick={() => updateQuantity(p.id, -1)} className="w-10 h-10 flex items-center justify-center"><Minus className="w-4 h-4"/></button><span className="w-8 text-center font-bold">{qty}</span><button onClick={() => updateQuantity(p.id, 1)} className="w-10 h-10 flex items-center justify-center"><Plus className="w-4 h-4"/></button></div>
-                        )}
+                        <div className="text-right">
+                            <div className="text-lg font-bold">{formatDate(data.date)}</div>
+                            <div className="text-base text-gray-500">{formatTime(data.date)} Uhr</div>
+                            <div className="text-xs text-gray-400 mt-1">ID: {data.orderId ? data.orderId.slice(0,6) : 'SAMMEL'}</div>
+                        </div>
                     </div>
-                );
-            })}
-            {filteredProducts.length === 0 && (
-                <div className="text-center py-10 text-slate-400 flex flex-col items-center">
-                    <AlertTriangle className="w-10 h-10 mb-2 opacity-50"/>
-                    <p>Keine Artikel in dieser Kategorie.</p>
-                    {activeCategory === 'sonstiges' && role === 'shisha' && <p className="text-xs mt-2 max-w-xs">Tipp: Falls du neue Artikel suchst, stelle sicher, dass die Kategorie "Sonstiges" im Büro für "Shisha" freigegeben ist.</p>}
-                </div>
-            )}
-        </div>
-        {/* FIX: Button erscheint jetzt auch, wenn nur Shisha-Inventar gefüllt ist */}
-        {(Object.keys(cart).length > 0 || Object.keys(shishaInventory).length > 0) && (<div className="fixed bottom-0 w-full p-4 bg-white border-t"><button onClick={() => setIsReviewing(true)} className="w-full bg-pink-600 text-white py-4 rounded-xl font-bold flex justify-between px-6"><span>Weiter</span><span>&rarr;</span></button></div>)}
-    </div>
-  );
-};
-
-const OfficeView = ({ user, appId, products, categories, suppliers, onLogout }) => {
-  const [activeTab, setActiveTab] = useState('orders'); 
-  const [viewMode, setViewMode] = useState('suppliers'); 
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [printData, setPrintData] = useState(null); 
-  const [statsPrintData, setStatsPrintData] = useState(null);
-  const [shoppingData, setShoppingData] = useState(null); 
-  const [showPinChangeModal, setShowPinChangeModal] = useState(false);
-  const [newPin, setNewPin] = useState("");
-
-  useEffect(() => {
-    if (!user) return;
-    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'orders'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const f = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      f.sort((a, b) => { const da = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0); const db = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0); return db - da; });
-      setOrders(f);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, [user, appId]);
-
-  const updateStatus = async (id, status) => {
-      if (status === 'delete' && !confirm("Löschen?")) return;
-      try {
-          if (status === 'delete') await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', id));
-          else await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', id), { status });
-      } catch(e) { alert("Fehler"); }
-  };
-
-  const completeShoppingTrip = async (items) => {
-      if(!confirm("Einkauf wirklich abschließen? Die Artikel werden ins Archiv verschoben.")) return;
-      const supplierName = shoppingData.supplier;
-      const batch = writeBatch(db);
-      let count = 0;
-      
-      orders.forEach(order => {
-          if(order.status !== 'archived') {
-              const hasItems = order.items.some(i => i.supplier === supplierName);
-              if(hasItems) {
-                  const completed = order.completedSuppliers || [];
-                  if(!completed.includes(supplierName)) {
-                    const allSuppliers = [...new Set(order.items.map(i => i.supplier))];
-                    const newCompleted = [...completed, supplierName];
-                    const newStatus = allSuppliers.every(s => newCompleted.includes(s)) ? 'archived' : 'open';
                     
-                    batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
-                        completedSuppliers: newCompleted,
-                        status: newStatus
-                    });
-                    count++;
-                  }
-              }
-          }
-      });
-      if(count > 0) { await batch.commit(); setShoppingData(null); alert("Erledigt."); } else { setShoppingData(null); }
-  };
-
-  const completeDirectOrder = async (supplierName) => {
-      if(!confirm(`Bestellung bei ${supplierName} erledigt?`)) return;
-      const batch = writeBatch(db);
-      let count = 0;
-      orders.forEach(order => {
-          if(order.status !== 'archived') {
-              const hasItems = order.items.some(i => i.supplier === supplierName);
-              if(hasItems) {
-                  const completed = order.completedSuppliers || [];
-                  if(!completed.includes(supplierName)) {
-                      const allSuppliers = [...new Set(order.items.map(i => i.supplier))];
-                      const newCompleted = [...completed, supplierName];
-                      const newStatus = allSuppliers.every(s => newCompleted.includes(s)) ? 'archived' : 'open';
-                      
-                      batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
-                          completedSuppliers: newCompleted,
-                          status: newStatus
-                      });
-                      count++;
-                  }
-              }
-          }
-      });
-      if(count > 0) await batch.commit();
-  };
-
-  const exportToCSV = () => {
-      const historyOrders = orders.filter(o => o.status === 'archived');
-      if (historyOrders.length === 0) return alert("Keine Daten im Archiv.");
-      let csvContent = "\uFEFFDatum;Abteilung;Lieferant;Artikel;Menge;Einheit\n";
-      historyOrders.forEach(o => {
-          const date = o.createdAt?.toDate ? o.createdAt.toDate().toLocaleDateString() : '';
-          o.items.forEach(i => { csvContent += `${date};${o.department};${i.supplier};${i.name};${i.quantity};${i.unit}\n`; });
-      });
-      const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", "mabelle_export.csv");
-      document.body.appendChild(link);
-      link.click();
-  };
-
-  const handleDigit = (d) => setNewPin(p => p + d);
-  const handleClear = () => setNewPin(p => p.slice(0, -1));
-  const handleChangePin = async () => {
-      if (newPin.length < 4) return alert("Zu kurz");
-      try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'office_auth'), { pin: newPin }); alert("Geändert!"); setShowPinChangeModal(false); setNewPin(""); } catch(e) { alert("Fehler"); }
-  };
-
-  const getAggregatedSupplierItems = () => {
-      const activeOrders = orders.filter(o => o.status !== 'archived');
-      const supplierGroups = {};
-      
-      activeOrders.forEach(order => {
-          const completed = order.completedSuppliers || [];
-          order.items.forEach(item => {
-              const sup = item.supplier || 'Sonstige';
-              // ONLY show if this supplier is NOT yet completed for this order
-              if(!completed.includes(sup)) {
-                  if (!supplierGroups[sup]) supplierGroups[sup] = [];
-                  supplierGroups[sup].push({ ...item, originDept: order.department, originOrderId: order.id, originNote: order.note });
-              }
-          });
-      });
-      const mergedGroups = {};
-      Object.keys(supplierGroups).forEach(sup => {
-          const rawItems = supplierGroups[sup];
-          const mergedMap = {};
-          rawItems.forEach(item => {
-              const key = `${item.name}-${item.unit}`;
-              if (!mergedMap[key]) { mergedMap[key] = { ...item, quantity: 0, breakdown: [] }; }
-              const qty = parseFloat(item.quantity) || 0;
-              mergedMap[key].quantity += qty;
-              const existingBreakdown = mergedMap[key].breakdown.find(b => b.department === item.originDept);
-              if (existingBreakdown) { existingBreakdown.quantity += qty; } else { mergedMap[key].breakdown.push({ department: item.originDept, quantity: qty }); }
-          });
-          
-          mergedGroups[sup] = Object.values(mergedMap).sort((a, b) => {
-             const getSortKey = (item) => {
-                 if (item.aisle) return item.aisle.toString().toLowerCase();
-                 const cat = categories.find(c => c.id === item.category);
-                 return cat ? cat.name.toLowerCase() : 'zzz';
-             };
-
-             const keyA = getSortKey(a);
-             const keyB = getSortKey(b);
-
-             if (keyA !== keyB) return keyA.localeCompare(keyB, undefined, { numeric: true, sensitivity: 'base' });
-             
-             return a.name.localeCompare(b.name);
-          });
-      });
-      return mergedGroups;
-  };
-
-  const displayedOrders = activeTab === 'history' ? orders.filter(o => o.status === 'archived') : orders.filter(o => o.status !== 'archived');
-  const aggregatedSuppliers = getAggregatedSupplierItems();
-
-  if (printData) return <OrderPrintView data={printData} onClose={() => setPrintData(null)} supplierDetails={suppliers} />;
-  if (statsPrintData) return <StatsPrintView data={statsPrintData} onClose={() => setStatsPrintData(null)} />;
-  if (shoppingData) return <ShoppingMode items={shoppingData.items} supplier={shoppingData.supplier} onClose={() => setShoppingData(null)} onComplete={completeShoppingTrip} categories={categories} />;
-
-  return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
-      <div className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm sticky top-0 z-10">
-        <div className="flex items-center gap-3"><div className="bg-emerald-100 p-2 rounded-lg"><ClipboardList className="w-6 h-6 text-emerald-600" /></div><div><h1 className="text-xl font-bold text-slate-800">MABELLE</h1><p className="text-xs text-slate-500">Office Dashboard</p></div></div>
-        <div className="flex gap-4 items-center">
-            <div className="hidden xl:flex bg-slate-100 p-1 rounded-lg">
-                <button onClick={() => setActiveTab('orders')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'orders' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Aktuell</button>
-                <button onClick={() => setActiveTab('products')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'products' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Artikel</button>
-                <button onClick={() => setActiveTab('suppliers')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'suppliers' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Lieferanten</button>
-                <button onClick={() => setActiveTab('categories')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'categories' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Gruppen</button>
-                <button onClick={() => setActiveTab('statistics')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'statistics' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Statistik</button>
-                <button onClick={() => setActiveTab('history')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'history' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Archiv</button>
+                    {/* Zeige entweder die übergebene Notiz (einzeln) oder die gesammelten (sammel) */}
+                    {(data.note || collectedNotes.length > 0) && (
+                    <div className="mb-4 p-3 border border-black bg-gray-50 rounded">
+                        <span className="font-bold text-xs uppercase block mb-1">Notizen:</span> 
+                        {data.note && <div className="mb-1">{data.note}</div>}
+                        {collectedNotes.map((note, idx) => (
+                        <div key={idx} className="font-medium text-sm border-l-2 border-slate-400 pl-2 mb-1">{note}</div>
+                        ))}
+                    </div>
+                    )}
+                    
+                    <table className="w-full text-left border-collapse">
+                        <thead><tr className="border-b-2 border-black"><th className="py-1 w-3/4">Artikel</th><th className="py-1 w-1/4 text-right">Menge</th><th className="py-1 w-12 pl-2"></th></tr></thead>
+                        <tbody>{data.items.map((item, i) => (<tr key={i} className="border-b border-gray-300"><td className="py-1 align-middle text-base font-medium">{item.name}</td><td className="py-1 text-right text-xl font-bold align-middle">{item.quantity}</td><td className="py-1 pl-2 align-middle text-sm">{item.unit}</td></tr>))}</tbody>
+                    </table>
+                </div>
             </div>
-            {activeTab === 'orders' && (<div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200"><button onClick={() => setViewMode('suppliers')} className={`p-2 rounded ${viewMode === 'suppliers' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}><Layers className="w-4 h-4"/></button><button onClick={() => setViewMode('orders')} className={`p-2 rounded ${viewMode === 'orders' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}><LayoutList className="w-4 h-4"/></button></div>)}
-            <button onClick={() => setShowPinChangeModal(true)} className="p-2 text-slate-400 hover:text-slate-600"><Settings className="w-5 h-5" /></button>
-            <button onClick={onLogout} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg font-medium hover:bg-red-100 border border-red-100"><LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Abmelden</span></button>
-        </div>
-      </div>
-      <div className="xl:hidden px-4 py-2 bg-white border-b border-slate-200 flex overflow-x-auto gap-2">{['orders', 'products', 'suppliers', 'categories', 'history'].map(t => (<button key={t} onClick={() => setActiveTab(t)} className={`flex-shrink-0 px-4 py-2 text-sm font-bold text-center border-b-2 ${activeTab === t ? 'border-pink-500 text-pink-600' : 'border-transparent text-slate-500'}`}>{t}</button>))}</div>
-      <main className="flex-1 p-4 md:p-8 max-w-5xl mx-auto w-full">
-        {activeTab === 'products' ? <ProductManager products={products} categories={categories} suppliers={suppliers} appId={appId} /> :
-         activeTab === 'categories' ? <CategoryManager categories={categories} appId={appId} /> :
-         activeTab === 'suppliers' ? <SupplierManager suppliers={suppliers} appId={appId} /> :
-         activeTab === 'statistics' ? <StatisticsView orders={orders} onPrint={setStatsPrintData} appId={appId} /> :
-         (
-             <div className="space-y-6">
-                 {activeTab === 'history' && (<div className="flex justify-end"><button onClick={exportToCSV} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg font-bold shadow-sm hover:bg-green-700 transition-all"><Download className="w-4 h-4"/> Excel Export</button></div>)}
-                 {activeTab === 'orders' && viewMode === 'suppliers' && (
-                     <div className="space-y-6">
-                         {Object.keys(aggregatedSuppliers).length === 0 ? <div className="text-center py-20 text-slate-400">Alles erledigt.</div> : 
-                          Object.entries(aggregatedSuppliers).map(([sup, items]) => {
-                             const supplierConfig = suppliers.find(s => s.name === sup) || {};
-                             const isShopping = supplierConfig.orderMethod === 'shopping';
-                             
-                             // HIER: Sammle Notizen für diesen Lieferanten
-                             const relevantOrders = orders.filter(o => o.status !== 'archived' && o.items.some(i => i.supplier === sup) && o.note);
-                             const uniqueNotes = [...new Set(relevantOrders.map(o => `${DEPT_NAMES[o.department] || o.department}: ${o.note}`))];
+            <style>{`@media print { body * { visibility: hidden; } .fixed.inset-0.z-50.bg-white.overflow-auto * { visibility: visible; } .fixed.inset-0.z-50.bg-white.overflow-auto { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; } .print\\:hidden { display: none !important; } }`}</style>
+            </div>
+        );
+        };
 
-                             return (
-                             <div key={sup} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                                 <div className="bg-slate-50 px-4 py-3 border-b flex justify-between items-center">
-                                     <div className="font-bold text-slate-800 flex items-center gap-2">{sup === 'Hamberger' ? <Store className="w-5 h-5 text-slate-500"/> : <Truck className="w-5 h-5 text-slate-500"/>}{sup}<span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full text-xs">{items.length} Artikel</span></div>
-                                     <div className="flex gap-2"><button onClick={() => setPrintData({ items, supplier: sup, date: new Date(), orderId: '', department: '', note: '' })} className="p-2 bg-white border rounded hover:bg-slate-50"><Printer className="w-6 h-6 text-slate-600"/></button>
-                                         {isShopping ? (<button onClick={() => setShoppingData({ items, supplier: sup })} className="flex items-center gap-2 px-3 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600 text-sm"><ShoppingCart className="w-4 h-4"/> Einkaufen</button>) : (<button onClick={() => completeDirectOrder(sup)} className="flex items-center gap-2 px-3 py-2 bg-white border border-green-500 text-green-600 rounded font-bold hover:bg-green-50 text-sm"><Check className="w-5 h-5"/> Erledigt</button>)}
-                                     </div>
-                                 </div>
-                                 
-                                 {/* Notizen-Anzeige im Dashboard */}
-                                 {uniqueNotes.length > 0 && (
-                                    <div className="bg-yellow-50 px-4 py-2 border-b border-yellow-100 text-sm text-yellow-800">
-                                        <div className="font-bold text-xs uppercase mb-1 flex items-center gap-1"><MessageSquare className="w-3 h-3"/> Hinweise:</div>
-                                        {uniqueNotes.map((note, idx) => (
-                                            <div key={idx} className="pl-2 border-l-2 border-yellow-300 mb-1 last:mb-0">{note}</div>
+        const ShoppingMode = ({ items, supplier, onClose, onComplete, categories }) => {
+        const [activeItemIds, setActiveItemIds] = useState(items ? items.map((_, i) => i) : []); 
+        const [showDone, setShowDone] = useState(false);
+        
+        if (!items) return null;
+
+        // Sammle Notizen für den Kopfbereich
+        const collectedNotes = [];
+        const processedOrders = new Set();
+        items.forEach(item => {
+            if (item.originOrderId && item.originNote && !processedOrders.has(item.originOrderId)) {
+            processedOrders.add(item.originOrderId);
+            collectedNotes.push({ dept: item.originDept, note: item.originNote });
+            }
+        });
+
+        const visibleItems = items.map((item, index) => ({ ...item, originalIndex: index }))
+                                    .filter(item => showDone || activeItemIds.includes(item.originalIndex));
+
+        const toggleItem = (originalIndex) => { 
+            if (activeItemIds.includes(originalIndex)) { 
+                setActiveItemIds(prev => prev.filter(id => id !== originalIndex)); 
+            } else { 
+                setActiveItemIds(prev => [...prev, originalIndex]); 
+            } 
+        };
+        
+        const activeCount = activeItemIds.length;
+        const totalCount = items.length;
+        const progress = totalCount > 0 ? ((totalCount - activeCount) / totalCount) * 100 : 0;
+
+        return (
+            <div className="fixed inset-0 z-50 bg-slate-100 flex flex-col h-screen animate-in slide-in-from-bottom duration-300">
+            <div className="bg-white p-4 shadow-sm border-b border-slate-200 flex items-center justify-between shrink-0"><button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full"><ArrowLeft className="w-6 h-6 text-slate-600" /></button><div className="text-center"><h2 className="font-bold text-slate-800">{supplier}</h2><p className="text-xs text-slate-500">{activeCount} offen</p></div><div className="w-10"></div></div>
+            <div className="h-2 bg-slate-200 w-full shrink-0"><div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${progress}%` }}></div></div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-32">
+                
+                {/* Notizen Bereich */}
+                {collectedNotes.length > 0 && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 mx-2">
+                    <h4 className="text-xs font-bold text-yellow-800 uppercase mb-1 flex items-center gap-1"><MessageSquare className="w-3 h-3"/> Wichtige Hinweise:</h4>
+                    <div className="space-y-1">
+                        {collectedNotes.map((n, i) => (
+                        <div key={i} className="text-sm text-yellow-900"><span className="font-bold">{DEPT_NAMES[n.dept] || n.dept}:</span> {n.note}</div>
+                        ))}
+                    </div>
+                    </div>
+                )}
+
+                {visibleItems.map((item, index) => { 
+                    const originalIndex = item.originalIndex;
+                    const isActive = activeItemIds.includes(originalIndex); 
+                    
+                    const prevItem = index > 0 ? visibleItems[index - 1] : null;
+                    
+                    let showHeader = false;
+                    let headerTitle = "";
+                    let isAisleHeader = false;
+                    
+                    const getEffectiveAisleName = (itm) => {
+                        if (itm.aisle) return itm.aisle;
+                        const cat = categories?.find(c => c.id === itm.category);
+                        return cat ? cat.name : 'Sonstiges';
+                    };
+
+                    const currentHeaderName = getEffectiveAisleName(item);
+                    const prevHeaderName = prevItem ? getEffectiveAisleName(prevItem) : null;
+
+                    if (currentHeaderName !== prevHeaderName) {
+                        showHeader = true;
+                        const isNumeric = /^\d+$/.test(currentHeaderName);
+                        
+                        if (item.aisle) {
+                            headerTitle = isNumeric ? `GANG ${currentHeaderName}` : currentHeaderName;
+                            isAisleHeader = true;
+                        } else {
+                            headerTitle = currentHeaderName;
+                            isAisleHeader = false;
+                        }
+                    }
+
+                    return (
+                        <React.Fragment key={originalIndex}>
+                        {showHeader && (
+                            <div className={`px-4 py-2 mt-6 first:mt-2 text-sm font-bold uppercase tracking-wider rounded-lg mx-2 flex items-center gap-2 shadow-sm ${isAisleHeader ? 'bg-slate-800 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                                {isAisleHeader ? <Footprints className="w-4 h-4 text-pink-400"/> : <Layers className="w-4 h-4 text-blue-400"/>}
+                                {headerTitle}
+                            </div>
+                        )}
+                        
+                        <div onClick={() => toggleItem(originalIndex)} className={`p-4 rounded-xl shadow-sm border-2 cursor-pointer transition-all active:scale-95 flex justify-between items-center ${isActive ? 'bg-white border-white hover:border-pink-100' : 'bg-slate-100 border-transparent opacity-60 grayscale'}`}>
+                            <div className="flex items-center gap-4">
+                                <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors shrink-0 ${isActive ? 'border-slate-300 bg-white' : 'border-emerald-500 bg-emerald-500'}`}>{!isActive && <CheckCircle className="w-5 h-5 text-white" />}</div>
+                                <div>
+                                    <span className={`text-lg font-bold block ${!isActive && 'line-through text-slate-500'}`}>{item.name}</span>
+                                </div>
+                            </div>
+                            <div className={`px-4 py-2 rounded-lg font-bold text-xl ${isActive ? 'bg-pink-50 text-pink-700' : 'bg-slate-200 text-slate-500 line-through'}`}>{item.quantity} <span className="text-sm font-normal">{item.unit}</span></div>
+                        </div>
+                        </React.Fragment>
+                    ); 
+                })}
+                
+                {activeCount === 0 && !showDone && (<div className="text-center py-20 text-slate-400 flex flex-col items-center"><div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-4"><CheckCircle className="w-10 h-10 text-emerald-600" /></div><h3 className="text-xl font-bold text-emerald-800">Alles erledigt!</h3></div>)}
+            </div>
+            <div className="p-4 bg-white border-t border-slate-200 shrink-0 safe-area-pb space-y-2 mb-8">{activeCount < totalCount && (<button onClick={() => onComplete(items)} className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 mb-2"><Archive className="w-5 h-5"/> Fertig & Archivieren</button>)}<button onClick={() => setShowDone(!showDone)} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-slate-500 font-medium hover:bg-slate-50 transition-colors">{showDone ? <><EyeOff className="w-4 h-4" /> Erledigte ausblenden</> : <><Eye className="w-4 h-4" /> Erledigte anzeigen ({totalCount - activeCount})</>}</button></div>
+            </div>
+        );
+        };
+
+        const RoleSelection = ({ onSelectRole, appId }) => {
+        const [showPinModal, setShowPinModal] = useState(false);
+        const [pinInput, setPinInput] = useState("");
+        const [error, setError] = useState("");
+        const [currentPin, setCurrentPin] = useState(DEFAULT_PIN);
+        useEffect(() => { const fetchPin = async () => { try { const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'office_auth')); if (docSnap.exists()) setCurrentPin(docSnap.data().pin || DEFAULT_PIN); } catch(e) { console.error(e); } }; fetchPin(); }, [appId]);
+        const handleOfficeClick = () => { setShowPinModal(true); setError(""); setPinInput(""); };
+        const handleDigit = (digit) => { setPinInput(prev => prev + digit); setError(""); };
+        const handleClear = () => { setPinInput(prev => prev.slice(0, -1)); };
+        const handleEnter = () => { if (pinInput === currentPin) { onSelectRole('office'); } else { setError("Falsche PIN"); setPinInput(""); } };
+        return (
+            <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+            <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center"><h1 className="text-3xl font-bold text-slate-800 mb-1">MABELLE</h1><h2 className="text-sm font-bold text-pink-600 tracking-widest uppercase mb-8">Order System</h2>
+                <div className="grid grid-cols-1 gap-4">
+                <button onClick={() => onSelectRole('kitchen')} className="flex items-center gap-4 p-4 bg-white border border-slate-200 hover:border-pink-300 hover:bg-pink-50 rounded-xl group"><div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center"><ChefHat className="w-6 h-6 text-blue-600" /></div><div className="text-left"><h3 className="text-lg font-bold text-slate-800">Küche</h3><p className="text-xs text-slate-500">Lebensmittel & Co.</p></div></button>
+                <button onClick={() => onSelectRole('bar')} className="flex items-center gap-4 p-4 bg-white border border-slate-200 hover:border-pink-300 hover:bg-pink-50 rounded-xl group"><div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center"><Wine className="w-6 h-6 text-purple-600" /></div><div className="text-left"><h3 className="text-lg font-bold text-slate-800">Bar</h3><p className="text-xs text-slate-500">Getränke & Sirup</p></div></button>
+                <button onClick={() => onSelectRole('shisha')} className="flex items-center gap-4 p-4 bg-white border border-slate-200 hover:border-pink-300 hover:bg-pink-50 rounded-xl group"><div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center"><Cloud className="w-6 h-6 text-orange-600" /></div><div className="text-left"><h3 className="text-lg font-bold text-slate-800">Shisha</h3><p className="text-xs text-slate-500">Tabak & Kohle</p></div></button>
+                <div className="my-2 border-t border-slate-100"></div>
+                <button onClick={handleOfficeClick} className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 rounded-xl group"><div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center"><ClipboardList className="w-6 h-6 text-emerald-600" /></div><div className="text-left"><h3 className="text-lg font-bold text-slate-800">Büro</h3><p className="text-xs text-slate-500">Verwaltung & Einkauf</p></div></button>
+                </div>
+            </div>
+            {showPinModal && (<div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-sm flex flex-col items-center"><div className="flex justify-between items-center w-full mb-6"><h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Lock className="w-5 h-5 text-emerald-600"/> Büro Login</h3><button onClick={() => setShowPinModal(false)} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-5 h-5 text-slate-400"/></button></div><div className="w-full text-center text-4xl font-bold tracking-[0.5em] p-4 border-2 border-slate-200 rounded-xl bg-slate-50 mb-4 h-20 flex items-center justify-center text-slate-800">{pinInput.split('').map(() => '●').join('')}</div>{error && <p className="text-red-500 text-center mb-2 font-bold">{error}</p>}<Numpad onDigit={handleDigit} onClear={handleClear} onEnter={handleEnter} /></div></div>)}
+            </div>
+        );
+        };
+
+        const OrderEntryView = ({ user, appId, role, products, categories, onLogout }) => {
+        const [cart, setCart] = useState({}); 
+        const [shishaInventory, setShishaInventory] = useState({}); 
+        const [activeCategory, setActiveCategory] = useState(null);
+        const [searchTerm, setSearchTerm] = useState('');
+        const [isReviewing, setIsReviewing] = useState(false);
+        const [isSubmitting, setIsSubmitting] = useState(false);
+        const [showSuccess, setShowSuccess] = useState(false);
+        const [orderNote, setOrderNote] = useState("");
+
+        const allowedCategories = categories.filter(c => c.allowedRoles && c.allowedRoles.includes(role));
+        useEffect(() => { if (allowedCategories.length > 0 && !activeCategory) setActiveCategory(allowedCategories[0].id || allowedCategories[0].name.toLowerCase()); }, [role, categories]);
+
+        const updateQuantity = (itemId, delta) => { setCart(prev => { const val = Math.max(0, (prev[itemId] || 0) + delta); const n = { ...prev, [itemId]: val }; if (val === 0) delete n[itemId]; return n; }); };
+        const updateInventory = (itemId, val, target) => { const stock = parseInt(val); if (isNaN(stock)) { const n = {...shishaInventory}; delete n[itemId]; setShishaInventory(n); return; } setShishaInventory(prev => ({...prev, [itemId]: stock})); };
+        const getShishaOrderQty = (itemId, target) => { if (shishaInventory[itemId] === undefined) return 0; return Math.max(0, target - shishaInventory[itemId]); };
+
+        const filteredProducts = products.filter(p => { 
+            if (p.department !== role && p.department !== 'all') return false; 
+            if (!activeCategory) return false;
+            return (p.category === activeCategory) && (searchTerm === '' || p.name.toLowerCase().includes(searchTerm.toLowerCase()));
+        });
+
+        const handleSubmitOrder = async () => {
+            setIsSubmitting(true);
+            try {
+            let orderItems = [];
+            if (role === 'shisha') {
+                Object.keys(shishaInventory).forEach(id => {
+                    const p = products.find(p => p.id === id);
+                    const qty = getShishaOrderQty(id, p.targetStock);
+                    if (qty > 0) orderItems.push({ productId: id, name: p.name, quantity: qty, unit: p.unit, category: p.category, supplier: p.supplier, currentStock: shishaInventory[id], targetStock: p.targetStock, department: 'shisha', aisle: p.aisle || '' });
+                });
+            } else {
+                orderItems = Object.entries(cart).map(([id, qty]) => { 
+                    const p = products.find(p => p.id === id); 
+                    return { productId: id, name: p.name, quantity: qty, unit: p.unit, category: p.category, supplier: p.supplier, aisle: p.aisle || '' }; 
+                });
+            }
+            if (orderItems.length === 0) { alert("Nichts zu bestellen."); setIsSubmitting(false); return; }
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), { 
+                items: orderItems, 
+                status: 'open', 
+                createdAt: serverTimestamp(), 
+                createdBy: user.uid, 
+                creatorName: `${DEPT_NAMES[role]} Team`, 
+                department: role, 
+                note: orderNote, 
+                completedSuppliers: [] 
+            });
+            setCart({}); setShishaInventory({}); setOrderNote(""); setIsReviewing(false); setShowSuccess(true); setTimeout(() => setShowSuccess(false), 3000);
+            } catch (e) { alert("Fehler"); } finally { setIsSubmitting(false); }
+        };
+
+        if (showSuccess) return (<div className="h-screen flex flex-col items-center justify-center bg-green-50"><CheckCircle className="w-16 h-16 text-green-600 mb-4"/><h2 className="text-2xl font-bold text-green-800">Gesendet!</h2></div>);
+
+        if (isReviewing) {
+            let reviewItems = [];
+            if (role === 'shisha') { Object.keys(shishaInventory).forEach(id => { const p = products.find(p => p.id === id); const qty = getShishaOrderQty(id, p.targetStock); if (qty > 0) reviewItems.push({ ...p, quantity: qty }); }); } 
+            else { reviewItems = Object.entries(cart).map(([id, qty]) => { const p = products.find(p => p.id === id); return { ...p, quantity: qty }; }); }
+            
+            return (
+                <div className="h-screen flex flex-col bg-white">
+                    <div className="p-4 border-b flex gap-4 items-center"><button onClick={() => setIsReviewing(false)}><ArrowLeft/></button><span className="font-bold">Prüfen</span></div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                        {reviewItems.map(i => (<div key={i.id} className="flex justify-between p-4 border rounded-lg"><span>{i.name}</span><span className="font-bold">{i.quantity} {i.unit}</span></div>))}
+                        <div className="mt-4"><label className="block text-sm font-bold mb-2">Notiz</label><textarea className="w-full border p-2 rounded" rows="3" value={orderNote} onChange={e => setOrderNote(e.target.value)} placeholder="Zusatzinfo..."></textarea></div>
+                    </div>
+                    <div className="p-4 border-t"><button onClick={handleSubmitOrder} disabled={isSubmitting} className="w-full bg-pink-600 text-white py-3 rounded-lg font-bold">Abschicken</button></div>
+                </div>
+            );
+        }
+
+        return (
+            <div className="h-screen flex flex-col bg-slate-50">
+                <div className="p-4 bg-white shadow-sm sticky top-0 z-10">
+                    <div className="flex justify-between mb-4"><h1 className="text-xl font-bold capitalize">{role} Order</h1><button onClick={onLogout} className="text-red-500"><LogOut/></button></div>
+                    {allowedCategories.length > 1 && (<div className="flex overflow-x-auto gap-2 pb-2 mb-2">{allowedCategories.map(c => <button key={c.id} onClick={() => setActiveCategory(c.id)} className={`px-4 py-2 rounded-full whitespace-nowrap ${activeCategory === c.id ? 'bg-pink-600 text-white' : 'bg-slate-100'}`}>{ICON_MAP[c.iconKey] || <Tag className="w-4 h-4"/>} <span className="font-medium">{c.name}</span></button>)}</div>)}
+                    <div className="relative"><Search className="absolute left-3 top-3 w-4 h-4 text-slate-400"/><input className="w-full pl-9 pr-4 py-2 bg-slate-100 rounded-lg" placeholder="Suche..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-24">
+                    {filteredProducts.map(p => {
+                        if (role === 'shisha') {
+                            const current = shishaInventory[p.id] !== undefined ? shishaInventory[p.id] : '';
+                            return (
+                                <div key={p.id} className="p-4 bg-white rounded-xl shadow-sm border-l-4 border-slate-200">
+                                    <div className="flex justify-between items-center mb-0"><div><div className="font-bold text-lg">{p.name}</div></div>
+                                    <div className="flex items-center gap-2 justify-end">
+                                        <button onClick={() => { const v = parseInt(current||0); if(v>0) updateInventory(p.id, (v-1).toString(), p.targetStock); }} className="w-10 h-10 bg-slate-100 rounded flex items-center justify-center"><Minus/></button>
+                                        <input type="number" className="w-12 text-center text-xl font-bold bg-transparent" value={current} onChange={e => updateInventory(p.id, e.target.value, p.targetStock)} placeholder="0"/>
+                                        <button onClick={() => { const v = parseInt(current||0); updateInventory(p.id, (v+1).toString(), p.targetStock); }} className="w-10 h-10 bg-slate-100 rounded flex items-center justify-center"><Plus/></button>
+                                    </div></div>
+                                </div>
+                            );
+                        }
+                        const qty = cart[p.id] || 0;
+                        return (
+                            <div key={p.id} className={`flex justify-between items-center p-4 bg-white rounded-xl shadow-sm border-2 ${qty > 0 ? 'border-pink-500' : 'border-transparent'}`}>
+                                <div><div className="font-bold">{p.name}</div><div className="text-xs text-slate-500">{p.unit}</div></div>
+                                {qty === 0 ? (<button onClick={() => updateQuantity(p.id, 1)} className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-pink-600"><Plus/></button>) : (
+                                    <div className="flex items-center bg-pink-50 rounded-full"><button onClick={() => updateQuantity(p.id, -1)} className="w-10 h-10 flex items-center justify-center"><Minus className="w-4 h-4"/></button><span className="w-8 text-center font-bold">{qty}</span><button onClick={() => updateQuantity(p.id, 1)} className="w-10 h-10 flex items-center justify-center"><Plus className="w-4 h-4"/></button></div>
+                                )}
+                            </div>
+                        );
+                    })}
+                    {filteredProducts.length === 0 && (
+                        <div className="text-center py-10 text-slate-400 flex flex-col items-center">
+                            <AlertTriangle className="w-10 h-10 mb-2 opacity-50"/>
+                            <p>Keine Artikel in dieser Kategorie.</p>
+                            {activeCategory === 'sonstiges' && role === 'shisha' && <p className="text-xs mt-2 max-w-xs">Tipp: Falls du neue Artikel suchst, stelle sicher, dass die Kategorie "Sonstiges" im Büro für "Shisha" freigegeben ist.</p>}
+                        </div>
+                    )}
+                </div>
+                {/* FIX: Button erscheint jetzt auch, wenn nur Shisha-Inventar gefüllt ist */}
+                {(Object.keys(cart).length > 0 || Object.keys(shishaInventory).length > 0) && (<div className="fixed bottom-0 w-full p-4 bg-white border-t"><button onClick={() => setIsReviewing(true)} className="w-full bg-pink-600 text-white py-4 rounded-xl font-bold flex justify-between px-6"><span>Weiter</span><span>&rarr;</span></button></div>)}
+            </div>
+        );
+        };
+
+        const OfficeView = ({ user, appId, products, categories, suppliers, onLogout }) => {
+        const [activeTab, setActiveTab] = useState('orders'); 
+        const [viewMode, setViewMode] = useState('suppliers'); 
+        const [orders, setOrders] = useState([]);
+        const [loading, setLoading] = useState(true);
+        const [printData, setPrintData] = useState(null); 
+        const [statsPrintData, setStatsPrintData] = useState(null);
+        const [shoppingData, setShoppingData] = useState(null); 
+        const [showPinChangeModal, setShowPinChangeModal] = useState(false);
+        const [newPin, setNewPin] = useState("");
+
+        useEffect(() => {
+            if (!user) return;
+            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'orders'));
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+            const f = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            f.sort((a, b) => { const da = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0); const db = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0); return db - da; });
+            setOrders(f);
+            setLoading(false);
+            });
+            return () => unsubscribe();
+        }, [user, appId]);
+
+        const updateStatus = async (id, status) => {
+            if (status === 'delete' && !confirm("Löschen?")) return;
+            try {
+                if (status === 'delete') await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', id));
+                else await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', id), { status });
+            } catch(e) { alert("Fehler"); }
+        };
+
+        const completeShoppingTrip = async (items) => {
+            if(!confirm("Einkauf wirklich abschließen? Die Artikel werden ins Archiv verschoben.")) return;
+            const supplierName = shoppingData.supplier;
+            const batch = writeBatch(db);
+            let count = 0;
+            
+            orders.forEach(order => {
+                if(order.status !== 'archived') {
+                    const hasItems = order.items.some(i => i.supplier === supplierName);
+                    if(hasItems) {
+                        const completed = order.completedSuppliers || [];
+                        if(!completed.includes(supplierName)) {
+                            const allSuppliers = [...new Set(order.items.map(i => i.supplier))];
+                            const newCompleted = [...completed, supplierName];
+                            const newStatus = allSuppliers.every(s => newCompleted.includes(s)) ? 'archived' : 'open';
+                            
+                            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
+                                completedSuppliers: newCompleted,
+                                status: newStatus
+                            });
+                            count++;
+                        }
+                    }
+                }
+            });
+            if(count > 0) { await batch.commit(); setShoppingData(null); alert("Erledigt."); } else { setShoppingData(null); }
+        };
+
+        const completeDirectOrder = async (supplierName) => {
+            if(!confirm(`Bestellung bei ${supplierName} erledigt?`)) return;
+            const batch = writeBatch(db);
+            let count = 0;
+            orders.forEach(order => {
+                if(order.status !== 'archived') {
+                    const hasItems = order.items.some(i => i.supplier === supplierName);
+                    if(hasItems) {
+                        const completed = order.completedSuppliers || [];
+                        if(!completed.includes(supplierName)) {
+                            const allSuppliers = [...new Set(order.items.map(i => i.supplier))];
+                            const newCompleted = [...completed, supplierName];
+                            const newStatus = allSuppliers.every(s => newCompleted.includes(s)) ? 'archived' : 'open';
+                            
+                            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { 
+                                completedSuppliers: newCompleted,
+                                status: newStatus
+                            });
+                            count++;
+                        }
+                    }
+                }
+            });
+            if(count > 0) await batch.commit();
+        };
+
+        const exportToCSV = () => {
+            const historyOrders = orders.filter(o => o.status === 'archived');
+            if (historyOrders.length === 0) return alert("Keine Daten im Archiv.");
+            let csvContent = "\uFEFFDatum;Abteilung;Lieferant;Artikel;Menge;Einheit\n";
+            historyOrders.forEach(o => {
+                const date = o.createdAt?.toDate ? o.createdAt.toDate().toLocaleDateString() : '';
+                o.items.forEach(i => { csvContent += `${date};${o.department};${i.supplier};${i.name};${i.quantity};${i.unit}\n`; });
+            });
+            const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "mabelle_export.csv");
+            document.body.appendChild(link);
+            link.click();
+        };
+
+        const handleDigit = (d) => setNewPin(p => p + d);
+        const handleClear = () => setNewPin(p => p.slice(0, -1));
+        const handleChangePin = async () => {
+            if (newPin.length < 4) return alert("Zu kurz");
+            try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'office_auth'), { pin: newPin }); alert("Geändert!"); setShowPinChangeModal(false); setNewPin(""); } catch(e) { alert("Fehler"); }
+        };
+
+        const getAggregatedSupplierItems = () => {
+            const activeOrders = orders.filter(o => o.status !== 'archived');
+            const supplierGroups = {};
+            
+            activeOrders.forEach(order => {
+                const completed = order.completedSuppliers || [];
+                order.items.forEach(item => {
+                    const sup = item.supplier || 'Sonstige';
+                    // ONLY show if this supplier is NOT yet completed for this order
+                    if(!completed.includes(sup)) {
+                        if (!supplierGroups[sup]) supplierGroups[sup] = [];
+                        supplierGroups[sup].push({ ...item, originDept: order.department, originOrderId: order.id, originNote: order.note });
+                    }
+                });
+            });
+            const mergedGroups = {};
+            Object.keys(supplierGroups).forEach(sup => {
+                const rawItems = supplierGroups[sup];
+                const mergedMap = {};
+                rawItems.forEach(item => {
+                    const key = `${item.name}-${item.unit}`;
+                    if (!mergedMap[key]) { mergedMap[key] = { ...item, quantity: 0, breakdown: [] }; }
+                    const qty = parseFloat(item.quantity) || 0;
+                    mergedMap[key].quantity += qty;
+                    const existingBreakdown = mergedMap[key].breakdown.find(b => b.department === item.originDept);
+                    if (existingBreakdown) { existingBreakdown.quantity += qty; } else { mergedMap[key].breakdown.push({ department: item.originDept, quantity: qty }); }
+                });
+                
+                mergedGroups[sup] = Object.values(mergedMap).sort((a, b) => {
+                    const getSortKey = (item) => {
+                        if (item.aisle) return item.aisle.toString().toLowerCase();
+                        const cat = categories.find(c => c.id === item.category);
+                        return cat ? cat.name.toLowerCase() : 'zzz';
+                    };
+
+                    const keyA = getSortKey(a);
+                    const keyB = getSortKey(b);
+
+                    if (keyA !== keyB) return keyA.localeCompare(keyB, undefined, { numeric: true, sensitivity: 'base' });
+                    
+                    return a.name.localeCompare(b.name);
+                });
+            });
+            return mergedGroups;
+        };
+
+        const displayedOrders = activeTab === 'history' ? orders.filter(o => o.status === 'archived') : orders.filter(o => o.status !== 'archived');
+        const aggregatedSuppliers = getAggregatedSupplierItems();
+
+        if (printData) return <OrderPrintView data={printData} onClose={() => setPrintData(null)} supplierDetails={suppliers} />;
+        if (statsPrintData) return <StatsPrintView data={statsPrintData} onClose={() => setStatsPrintData(null)} />;
+        if (shoppingData) return <ShoppingMode items={shoppingData.items} supplier={shoppingData.supplier} onClose={() => setShoppingData(null)} onComplete={completeShoppingTrip} categories={categories} />;
+
+        return (
+            <div className="min-h-screen bg-slate-100 flex flex-col">
+            <div className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm sticky top-0 z-10">
+                <div className="flex items-center gap-3"><div className="bg-emerald-100 p-2 rounded-lg"><ClipboardList className="w-6 h-6 text-emerald-600" /></div><div><h1 className="text-xl font-bold text-slate-800">MABELLE</h1><p className="text-xs text-slate-500">Office Dashboard</p></div></div>
+                <div className="flex gap-4 items-center">
+                    <div className="hidden xl:flex bg-slate-100 p-1 rounded-lg">
+                        <button onClick={() => setActiveTab('orders')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'orders' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Aktuell</button>
+                        <button onClick={() => setActiveTab('products')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'products' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Artikel</button>
+                        <button onClick={() => setActiveTab('suppliers')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'suppliers' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Lieferanten</button>
+                        <button onClick={() => setActiveTab('categories')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'categories' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Gruppen</button>
+                        <button onClick={() => setActiveTab('statistics')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'statistics' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Statistik</button>
+                        <button onClick={() => setActiveTab('history')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'history' ? 'bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Archiv</button>
+                    </div>
+                    {activeTab === 'orders' && (<div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200"><button onClick={() => setViewMode('suppliers')} className={`p-2 rounded ${viewMode === 'suppliers' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}><Layers className="w-4 h-4"/></button><button onClick={() => setViewMode('orders')} className={`p-2 rounded ${viewMode === 'orders' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}><LayoutList className="w-4 h-4"/></button></div>)}
+                    <button onClick={() => setShowPinChangeModal(true)} className="p-2 text-slate-400 hover:text-slate-600"><Settings className="w-5 h-5" /></button>
+                    <button onClick={onLogout} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg font-medium hover:bg-red-100 border border-red-100"><LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Abmelden</span></button>
+                </div>
+            </div>
+            <div className="xl:hidden px-4 py-2 bg-white border-b border-slate-200 flex overflow-x-auto gap-2">{['orders', 'products', 'suppliers', 'categories', 'history'].map(t => (<button key={t} onClick={() => setActiveTab(t)} className={`flex-shrink-0 px-4 py-2 text-sm font-bold text-center border-b-2 ${activeTab === t ? 'border-pink-500 text-pink-600' : 'border-transparent text-slate-500'}`}>{t}</button>))}</div>
+            <main className="flex-1 p-4 md:p-8 max-w-5xl mx-auto w-full">
+                {activeTab === 'products' ? <ProductManager products={products} categories={categories} suppliers={suppliers} appId={appId} /> :
+                activeTab === 'categories' ? <CategoryManager categories={categories} appId={appId} /> :
+                activeTab === 'suppliers' ? <SupplierManager suppliers={suppliers} appId={appId} /> :
+                activeTab === 'statistics' ? <StatisticsView orders={orders} onPrint={setStatsPrintData} appId={appId} /> :
+                (
+                    <div className="space-y-6">
+                        {activeTab === 'history' && (<div className="flex justify-end"><button onClick={exportToCSV} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg font-bold shadow-sm hover:bg-green-700 transition-all"><Download className="w-4 h-4"/> Excel Export</button></div>)}
+                        {activeTab === 'orders' && viewMode === 'suppliers' && (
+                            <div className="space-y-6">
+                                {Object.keys(aggregatedSuppliers).length === 0 ? <div className="text-center py-20 text-slate-400">Alles erledigt.</div> : 
+                                Object.entries(aggregatedSuppliers).map(([sup, items]) => {
+                                    const supplierConfig = suppliers.find(s => s.name === sup) || {};
+                                    const isShopping = supplierConfig.orderMethod === 'shopping';
+                                    
+                                    // HIER: Sammle Notizen für diesen Lieferanten
+                                    const relevantOrders = orders.filter(o => o.status !== 'archived' && o.items.some(i => i.supplier === sup) && o.note);
+                                    const uniqueNotes = [...new Set(relevantOrders.map(o => `${DEPT_NAMES[o.department] || o.department}: ${o.note}`))];
+
+                                    return (
+                                    <div key={sup} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                                        <div className="bg-slate-50 px-4 py-3 border-b flex justify-between items-center">
+                                            <div className="font-bold text-slate-800 flex items-center gap-2">{sup === 'Hamberger' ? <Store className="w-5 h-5 text-slate-500"/> : <Truck className="w-5 h-5 text-slate-500"/>}{sup}<span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full text-xs">{items.length} Artikel</span></div>
+                                            <div className="flex gap-2"><button onClick={() => setPrintData({ items, supplier: sup, date: new Date(), orderId: '', department: '', note: '' })} className="p-2 bg-white border rounded hover:bg-slate-50"><Printer className="w-6 h-6 text-slate-600"/></button>
+                                                {isShopping ? (<button onClick={() => setShoppingData({ items, supplier: sup })} className="flex items-center gap-2 px-3 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600 text-sm"><ShoppingCart className="w-4 h-4"/> Einkaufen</button>) : (<button onClick={() => completeDirectOrder(sup)} className="flex items-center gap-2 px-3 py-2 bg-white border border-green-500 text-green-600 rounded font-bold hover:bg-green-50 text-sm"><Check className="w-5 h-5"/> Erledigt</button>)}
+                                            </div>
+                                        </div>
+                                        
+                                        {/* Notizen-Anzeige im Dashboard */}
+                                        {uniqueNotes.length > 0 && (
+                                            <div className="bg-yellow-50 px-4 py-2 border-b border-yellow-100 text-sm text-yellow-800">
+                                                <div className="font-bold text-xs uppercase mb-1 flex items-center gap-1"><MessageSquare className="w-3 h-3"/> Hinweise:</div>
+                                                {uniqueNotes.map((note, idx) => (
+                                                    <div key={idx} className="pl-2 border-l-2 border-yellow-300 mb-1 last:mb-0">{note}</div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <div className="divide-y divide-slate-100">{items.map((item, idx) => (<div key={idx} className="p-3 flex justify-between items-center hover:bg-slate-50"><div><div className="font-medium text-slate-800">{item.name}</div>{item.breakdown.length > 0 && (<div className="flex gap-2 mt-1">{item.breakdown.map((b, i) => (<span key={i} className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${b.department === 'kitchen' ? 'bg-blue-100 text-blue-700' : b.department === 'bar' ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700'}`}>{DEPT_NAMES[b.department] || b.department}: {b.quantity}</span>))}</div>)}</div><div className="font-bold text-lg">{item.quantity} <span className="text-sm font-normal text-slate-500">{item.unit}</span></div></div>))}</div>
+                                    </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        {(activeTab === 'history' || (activeTab === 'orders' && viewMode === 'orders')) && (
+                            displayedOrders.length === 0 ? <div className="text-center py-20 text-slate-400">Keine Daten.</div> : displayedOrders.map(order => {
+                            const grouped = groupItemsBySupplier(order.items);
+                            const completedSuppliers = order.completedSuppliers || [];
+                            return (
+                                <div key={order.id} className={`bg-white rounded-xl border-l-4 shadow-sm overflow-hidden ${order.status === 'ordered' || order.status === 'archived' ? 'border-gray-400 opacity-80' : 'border-pink-500'}`}>
+                                    <div className="p-4 border-b flex flex-col sm:flex-row justify-between bg-slate-50 gap-4">
+                                        <div className="flex gap-3 items-center">
+                                            <div className="bg-white p-2 rounded-full shadow-sm border border-slate-200">{order.department === 'bar' ? <Wine className="w-5 h-5 text-purple-600"/> : order.department === 'shisha' ? <Cloud className="w-5 h-5 text-orange-600"/> : <ChefHat className="w-5 h-5 text-blue-600"/>}</div>
+                                            <div><div className="font-bold text-slate-800 uppercase">{order.department} TEAM</div><div className="text-xs text-slate-500">{formatDate(order.createdAt)} • {order.creatorName}</div></div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {(order.status === 'ordered' || order.status === 'archived') && activeTab !== 'history' && <button onClick={() => updateStatus(order.id, 'archived')} className="px-3 py-1 bg-slate-600 text-white rounded font-medium flex items-center gap-2 hover:bg-slate-700"><Archive className="w-3 h-3"/> Archivieren</button>}
+                                            <button onClick={() => updateStatus(order.id, 'delete')} className="p-2 text-red-400 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4"/></button>
+                                        </div>
+                                    </div>
+                                    {order.note && <div className="px-4 pt-4"><div className="p-3 bg-yellow-50 text-sm border border-yellow-200 rounded text-slate-700 flex gap-2"><MessageSquare className="w-4 h-4 text-yellow-600 shrink-0 mt-0.5"/><div><b>Notiz:</b> {order.note}</div></div></div>}
+                                    <div className="p-4 space-y-4">
+                                        {Object.entries(grouped).map(([sup, items]) => (
+                                            <div key={sup} className={`border rounded-lg overflow-hidden border-slate-200 ${completedSuppliers.includes(sup) ? 'opacity-50 grayscale' : ''}`}>
+                                                <div className="bg-slate-50 px-3 py-2 font-bold flex justify-between items-center text-sm text-slate-700">
+                                                    <div className="flex items-center gap-2">{sup}{completedSuppliers.includes(sup) && <span className="text-green-600 flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Erledigt</span>}</div>
+                                                </div>
+                                                <div className="p-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 bg-white">
+                                                    {items.map((i, idx) => (<div key={idx} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100"><div className="text-sm font-medium text-slate-700">{i.name}</div><div className="font-bold text-sm bg-white px-2 py-0.5 rounded shadow-sm border">{i.quantity} {i.unit}</div></div>))}
+                                                </div>
+                                            </div>
                                         ))}
                                     </div>
-                                 )}
+                                </div>
+                            );
+                        })
+                        )}
+                    </div>
+                )
+                }
+            </main>
+            
+            {showPinChangeModal && (<div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-sm flex flex-col items-center"><h3 className="font-bold mb-4">Neue PIN</h3><div className="text-4xl font-bold tracking-widest mb-4">{newPin.split('').map(() => '●').join('')}</div><Numpad onDigit={handleDigit} onClear={handleClear} onEnter={handleChangePin} /><button onClick={() => setShowPinChangeModal(false)} className="mt-4 text-red-500 font-bold">Abbrechen</button></div></div>)}
+            </div>
+        );
+        };
 
-                                 <div className="divide-y divide-slate-100">{items.map((item, idx) => (<div key={idx} className="p-3 flex justify-between items-center hover:bg-slate-50"><div><div className="font-medium text-slate-800">{item.name}</div>{item.breakdown.length > 0 && (<div className="flex gap-2 mt-1">{item.breakdown.map((b, i) => (<span key={i} className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${b.department === 'kitchen' ? 'bg-blue-100 text-blue-700' : b.department === 'bar' ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700'}`}>{DEPT_NAMES[b.department] || b.department}: {b.quantity}</span>))}</div>)}</div><div className="font-bold text-lg">{item.quantity} <span className="text-sm font-normal text-slate-500">{item.unit}</span></div></div>))}</div>
-                             </div>
-                             );
-                          })}
-                     </div>
-                 )}
-                 {(activeTab === 'history' || (activeTab === 'orders' && viewMode === 'orders')) && (
-                     displayedOrders.length === 0 ? <div className="text-center py-20 text-slate-400">Keine Daten.</div> : displayedOrders.map(order => {
-                     const grouped = groupItemsBySupplier(order.items);
-                     const completedSuppliers = order.completedSuppliers || [];
-                     return (
-                         <div key={order.id} className={`bg-white rounded-xl border-l-4 shadow-sm overflow-hidden ${order.status === 'ordered' || order.status === 'archived' ? 'border-gray-400 opacity-80' : 'border-pink-500'}`}>
-                             <div className="p-4 border-b flex flex-col sm:flex-row justify-between bg-slate-50 gap-4">
-                                 <div className="flex gap-3 items-center">
-                                     <div className="bg-white p-2 rounded-full shadow-sm border border-slate-200">{order.department === 'bar' ? <Wine className="w-5 h-5 text-purple-600"/> : order.department === 'shisha' ? <Cloud className="w-5 h-5 text-orange-600"/> : <ChefHat className="w-5 h-5 text-blue-600"/>}</div>
-                                     <div><div className="font-bold text-slate-800 uppercase">{order.department} TEAM</div><div className="text-xs text-slate-500">{formatDate(order.createdAt)} • {order.creatorName}</div></div>
-                                 </div>
-                                 <div className="flex gap-2">
-                                     {(order.status === 'ordered' || order.status === 'archived') && activeTab !== 'history' && <button onClick={() => updateStatus(order.id, 'archived')} className="px-3 py-1 bg-slate-600 text-white rounded font-medium flex items-center gap-2 hover:bg-slate-700"><Archive className="w-3 h-3"/> Archivieren</button>}
-                                     <button onClick={() => updateStatus(order.id, 'delete')} className="p-2 text-red-400 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4"/></button>
-                                 </div>
-                             </div>
-                             {order.note && <div className="px-4 pt-4"><div className="p-3 bg-yellow-50 text-sm border border-yellow-200 rounded text-slate-700 flex gap-2"><MessageSquare className="w-4 h-4 text-yellow-600 shrink-0 mt-0.5"/><div><b>Notiz:</b> {order.note}</div></div></div>}
-                             <div className="p-4 space-y-4">
-                                 {Object.entries(grouped).map(([sup, items]) => (
-                                     <div key={sup} className={`border rounded-lg overflow-hidden border-slate-200 ${completedSuppliers.includes(sup) ? 'opacity-50 grayscale' : ''}`}>
-                                         <div className="bg-slate-50 px-3 py-2 font-bold flex justify-between items-center text-sm text-slate-700">
-                                             <div className="flex items-center gap-2">{sup}{completedSuppliers.includes(sup) && <span className="text-green-600 flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Erledigt</span>}</div>
-                                         </div>
-                                         <div className="p-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 bg-white">
-                                             {items.map((i, idx) => (<div key={idx} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100"><div className="text-sm font-medium text-slate-700">{i.name}</div><div className="font-bold text-sm bg-white px-2 py-0.5 rounded shadow-sm border">{i.quantity} {i.unit}</div></div>))}
-                                         </div>
-                                     </div>
-                                 ))}
-                             </div>
-                          </div>
-                      );
-                  })
-                 )}
-             </div>
-         )
+        function App() {
+            const [user, setUser] = useState(null);
+            const [role, setRole] = useState(null); 
+            const [authInitialized, setAuthInitialized] = useState(false);
+            const [products, setProducts] = useState([]);
+            const [categories, setCategories] = useState([]);
+            const [suppliers, setSuppliers] = useState([]);
+
+            useEffect(() => {
+                const initAuth = async () => {
+                try {
+                    // In der statischen HTML Version gibt es meist keinen Custom Token vom Server
+                    // Wir nutzen signInAnonymously als Fallback
+                    if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
+                        await signInWithCustomToken(auth, window.__initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (error) { console.error("Auth failed", error); }
+                };
+                initAuth();
+                return onAuthStateChanged(auth, (u) => { setUser(u); setAuthInitialized(true); });
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const unsubProd = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'products')), (snapshot) => {
+                    const f = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+                    f.sort((a, b) => {
+                        const orderA = a.sortOrder !== undefined ? parseInt(a.sortOrder) : 9999;
+                        const orderB = b.sortOrder !== undefined ? parseInt(b.sortOrder) : 9999;
+                        if (orderA !== orderB) return orderA - orderB;
+                        return a.name.localeCompare(b.name);
+                    });
+                    setProducts(f);
+                });
+                const unsubCat = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'categories')), (snapshot) => {
+                    let f = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+                    f.sort((a,b) => {
+                        const orderA = a.sortOrder !== undefined ? parseInt(a.sortOrder) : 100;
+                        const orderB = b.sortOrder !== undefined ? parseInt(b.sortOrder) : 100;
+                        if (orderA !== orderB) return orderA - orderB;
+                        return a.name.localeCompare(b.name);
+                    }); 
+                    setCategories(f);
+                });
+                const unsubSup = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'suppliers')), (snapshot) => {
+                    let f = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+                    f.sort((a,b) => {
+                        // Sort by sortOrder first, then name
+                        const orderA = a.sortOrder !== undefined ? parseInt(a.sortOrder) : 100;
+                        const orderB = b.sortOrder !== undefined ? parseInt(b.sortOrder) : 100;
+                        if (orderA !== orderB) return orderA - orderB;
+                        return a.name.localeCompare(b.name);
+                    }); 
+                    setSuppliers(f);
+                });
+                return () => { unsubProd(); unsubCat(); unsubSup(); };
+            }, [user, appId]);
+
+            if (!authInitialized) return <Loading />;
+            if (!user) return <div className="h-screen flex items-center justify-center text-slate-500">Bitte anmelden...</div>;
+            if (!role) return <RoleSelection onSelectRole={setRole} appId={appId} />;
+            
+            if (role === 'office') {
+                return <OfficeView user={user} appId={appId} products={products} categories={categories} suppliers={suppliers} onLogout={() => setRole(null)} />;
+            } else {
+                return <OrderEntryView user={user} appId={appId} role={role} products={products} categories={categories} onLogout={() => setRole(null)} />;
+            }
         }
-      </main>
-      
-      {showPinChangeModal && (<div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-sm flex flex-col items-center"><h3 className="font-bold mb-4">Neue PIN</h3><div className="text-4xl font-bold tracking-widest mb-4">{newPin.split('').map(() => '●').join('')}</div><Numpad onDigit={handleDigit} onClear={handleClear} onEnter={handleChangePin} /><button onClick={() => setShowPinChangeModal(false)} className="mt-4 text-red-500 font-bold">Abbrechen</button></div></div>)}
-    </div>
-  );
-};
 
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null); 
-  const [authInitialized, setAuthInitialized] = useState(false);
-  const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [suppliers, setSuppliers] = useState([]);
-
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
-        else await signInAnonymously(auth);
-      } catch (error) { console.error("Auth failed", error); }
-    };
-    initAuth();
-    return onAuthStateChanged(auth, (u) => { setUser(u); setAuthInitialized(true); });
-  }, []);
-
-  useEffect(() => {
-    if (!user) return;
-    const unsubProd = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'products')), (snapshot) => {
-        const f = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-        f.sort((a, b) => {
-          const orderA = a.sortOrder !== undefined ? parseInt(a.sortOrder) : 9999;
-          const orderB = b.sortOrder !== undefined ? parseInt(b.sortOrder) : 9999;
-          if (orderA !== orderB) return orderA - orderB;
-          return a.name.localeCompare(b.name);
-        });
-        setProducts(f);
-    });
-    const unsubCat = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'categories')), (snapshot) => {
-        let f = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-        f.sort((a,b) => {
-            const orderA = a.sortOrder !== undefined ? parseInt(a.sortOrder) : 100;
-            const orderB = b.sortOrder !== undefined ? parseInt(b.sortOrder) : 100;
-            if (orderA !== orderB) return orderA - orderB;
-            return a.name.localeCompare(b.name);
-        }); 
-        setCategories(f);
-    });
-    const unsubSup = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'suppliers')), (snapshot) => {
-        let f = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-        f.sort((a,b) => {
-          // Sort by sortOrder first, then name
-          const orderA = a.sortOrder !== undefined ? parseInt(a.sortOrder) : 100;
-          const orderB = b.sortOrder !== undefined ? parseInt(b.sortOrder) : 100;
-          if (orderA !== orderB) return orderA - orderB;
-          return a.name.localeCompare(b.name);
-        }); 
-        setSuppliers(f);
-    });
-    return () => { unsubProd(); unsubCat(); unsubSup(); };
-  }, [user, appId]);
-
-  if (!authInitialized) return <Loading />;
-  if (!user) return <div className="h-screen flex items-center justify-center text-slate-500">Bitte anmelden...</div>;
-  if (!role) return <RoleSelection onSelectRole={setRole} appId={appId} />;
-  
-  if (role === 'office') {
-    return <OfficeView user={user} appId={appId} products={products} categories={categories} suppliers={suppliers} onLogout={() => setRole(null)} />;
-  } else {
-    return <OrderEntryView user={user} appId={appId} role={role} products={products} categories={categories} onLogout={() => setRole(null)} />;
-  }
-}
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
