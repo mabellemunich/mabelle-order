@@ -940,7 +940,20 @@
 
         const updateQuantity = (itemId, delta) => { setCart(prev => { const val = Math.max(0, (prev[itemId] || 0) + delta); const n = { ...prev, [itemId]: val }; if (val === 0) delete n[itemId]; return n; }); };
         const updateInventory = (itemId, val, target) => { const stock = parseInt(val); if (isNaN(stock)) { const n = {...shishaInventory}; delete n[itemId]; setShishaInventory(n); return; } setShishaInventory(prev => ({...prev, [itemId]: stock})); };
-        const getShishaOrderQty = (itemId, target) => { if (shishaInventory[itemId] === undefined) return 0; return Math.max(0, target - shishaInventory[itemId]); };
+        
+        // --- FIX: Robustere Berechnung für Shisha-Bestellmenge ---
+        const getShishaOrderQty = (itemId, target) => { 
+            // Prüfen, ob eine Eingabe vorliegt (auch 0 ist eine gültige Eingabe)
+            const currentStock = shishaInventory[itemId];
+            if (currentStock === undefined) return 0; 
+            
+            const stockNum = parseInt(currentStock);
+            const targetNum = parseInt(target) || 0; // Default auf 0, falls targetStock fehlt
+            
+            if (isNaN(stockNum)) return 0; // Sollte durch updateInventory abgefangen sein, aber sicher ist sicher
+            
+            return Math.max(0, targetNum - stockNum); 
+        };
 
         const filteredProducts = products.filter(p => { 
             if (p.department !== role && p.department !== 'all') return false; 
@@ -955,8 +968,23 @@
             if (role === 'shisha') {
                 Object.keys(shishaInventory).forEach(id => {
                     const p = products.find(p => p.id === id);
-                    const qty = getShishaOrderQty(id, p.targetStock);
-                    if (qty > 0) orderItems.push({ productId: id, name: p.name, quantity: qty, unit: p.unit, category: p.category, supplier: p.supplier, currentStock: shishaInventory[id], targetStock: p.targetStock, department: 'shisha', aisle: p.aisle || '' });
+                    if (p) {
+                        const qty = getShishaOrderQty(id, p.targetStock);
+                        if (qty > 0) {
+                            orderItems.push({ 
+                                productId: id, 
+                                name: p.name, 
+                                quantity: qty, 
+                                unit: p.unit, 
+                                category: p.category, 
+                                supplier: p.supplier, 
+                                currentStock: shishaInventory[id], 
+                                targetStock: p.targetStock || 0, 
+                                department: 'shisha', 
+                                aisle: p.aisle || '' 
+                            });
+                        }
+                    }
                 });
             } else {
                 orderItems = Object.entries(cart).map(([id, qty]) => { 
@@ -983,17 +1011,26 @@
 
         if (isReviewing) {
             let reviewItems = [];
-            if (role === 'shisha') { Object.keys(shishaInventory).forEach(id => { const p = products.find(p => p.id === id); const qty = getShishaOrderQty(id, p.targetStock); if (qty > 0) reviewItems.push({ ...p, quantity: qty }); }); } 
+            if (role === 'shisha') { 
+                Object.keys(shishaInventory).forEach(id => { 
+                    const p = products.find(p => p.id === id); 
+                    if(p) {
+                        const qty = getShishaOrderQty(id, p.targetStock); 
+                        if (qty > 0) reviewItems.push({ ...p, quantity: qty }); 
+                    }
+                }); 
+            } 
             else { reviewItems = Object.entries(cart).map(([id, qty]) => { const p = products.find(p => p.id === id); return { ...p, quantity: qty }; }); }
             
             return (
                 <div className="h-screen flex flex-col bg-white">
                     <div className="p-4 border-b flex gap-4 items-center"><button onClick={() => setIsReviewing(false)}><ArrowLeft/></button><span className="font-bold">Prüfen</span></div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-24">
                         {reviewItems.map(i => (<div key={i.id} className="flex justify-between p-4 border rounded-lg"><span>{i.name}</span><span className="font-bold">{i.quantity} {i.unit}</span></div>))}
                         <div className="mt-4"><label className="block text-sm font-bold mb-2">Notiz</label><textarea className="w-full border p-2 rounded" rows="3" value={orderNote} onChange={e => setOrderNote(e.target.value)} placeholder="Zusatzinfo..."></textarea></div>
                     </div>
-                    <div className="p-4 border-t"><button onClick={handleSubmitOrder} disabled={isSubmitting} className="w-full bg-pink-600 text-white py-3 rounded-lg font-bold">Abschicken</button></div>
+                    {/* FIX: Bessere Sichtbarkeit auf Mobile durch fixed Positionierung im Review Screen */}
+                    <div className="fixed bottom-0 w-full p-4 bg-white border-t z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]"><button onClick={handleSubmitOrder} disabled={isSubmitting} className="w-full bg-pink-600 text-white py-3 rounded-lg font-bold">Abschicken</button></div>
                 </div>
             );
         }
@@ -1011,7 +1048,10 @@
                             const current = shishaInventory[p.id] !== undefined ? shishaInventory[p.id] : '';
                             return (
                                 <div key={p.id} className="p-4 bg-white rounded-xl shadow-sm border-l-4 border-slate-200">
-                                    <div className="flex justify-between items-center mb-0"><div><div className="font-bold text-lg">{p.name}</div></div>
+                                    <div className="flex justify-between items-center mb-0"><div><div className="font-bold text-lg">{p.name}</div>
+                                    {/* FIX: Soll-Bestand anzeigen für bessere Transparenz */}
+                                    <div className="text-xs text-slate-500 font-bold">Soll: {p.targetStock || 0} {p.unit}</div>
+                                    </div>
                                     <div className="flex items-center gap-2 justify-end">
                                         <button onClick={() => { const v = parseInt(current||0); if(v>0) updateInventory(p.id, (v-1).toString(), p.targetStock); }} className="w-10 h-10 bg-slate-100 rounded flex items-center justify-center"><Minus/></button>
                                         <input type="number" className="w-12 text-center text-xl font-bold bg-transparent" value={current} onChange={e => updateInventory(p.id, e.target.value, p.targetStock)} placeholder="0"/>
@@ -1038,8 +1078,8 @@
                         </div>
                     )}
                 </div>
-                {/* FIX: Button erscheint jetzt auch, wenn nur Shisha-Inventar gefüllt ist */}
-                {(Object.keys(cart).length > 0 || Object.keys(shishaInventory).length > 0) && (<div className="fixed bottom-0 w-full p-4 bg-white border-t"><button onClick={() => setIsReviewing(true)} className="w-full bg-pink-600 text-white py-4 rounded-xl font-bold flex justify-between px-6"><span>Weiter</span><span>&rarr;</span></button></div>)}
+                {/* FIX: Button erscheint jetzt auch, wenn nur Shisha-Inventar gefüllt ist + Z-Index erhöht für Sichtbarkeit */}
+                {(Object.keys(cart).length > 0 || Object.keys(shishaInventory).length > 0) && (<div className="fixed bottom-0 w-full p-4 bg-white border-t z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]"><button onClick={() => setIsReviewing(true)} className="w-full bg-pink-600 text-white py-4 rounded-xl font-bold flex justify-between px-6"><span>Weiter</span><span>&rarr;</span></button></div>)}
             </div>
         );
         };
@@ -1150,6 +1190,17 @@
         const handleChangePin = async () => {
             if (newPin.length < 4) return alert("Zu kurz");
             try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'office_auth'), { pin: newPin }); alert("Geändert!"); setShowPinChangeModal(false); setNewPin(""); } catch(e) { alert("Fehler"); }
+        };
+
+        // --- FIX: Fehlende Hilfsfunktion hinzugefügt, damit Archiv/Bestellungen nicht crashen ---
+        const groupItemsBySupplier = (items) => {
+            const groups = {};
+            items.forEach(item => {
+                const s = item.supplier || 'Unbekannt';
+                if (!groups[s]) groups[s] = [];
+                groups[s].push(item);
+            });
+            return groups;
         };
 
         const getAggregatedSupplierItems = () => {
