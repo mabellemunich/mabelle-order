@@ -8,8 +8,8 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Babel für JSX -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Babel für JSX - FIX: Version fixiert, um Fehler zu vermeiden -->
+    <script src="https://unpkg.com/@babel/standalone@7.24.4/babel.min.js"></script>
 
     <!-- Import Map für Module -->
     <script type="importmap">
@@ -28,7 +28,8 @@
 <body class="bg-slate-100 text-slate-900">
     <div id="root"></div>
 
-    <script type="text/babel" data-type="module">
+    <!-- FIX: data-presets="react" hinzugefügt, um den 'esmodules' Fehler zu beheben -->
+    <script type="text/babel" data-type="module" data-presets="react">
         import React, { useState, useEffect } from 'react';
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'firebase/app';
