@@ -2,8 +2,16 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MABELLE Order System</title>
+    
+    <!-- PWA Meta Tags für iOS & Android -->
+    <meta name="theme-color" content="#db2777">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MABELLE">
+    <link id="dynamic-apple-icon" rel="apple-touch-icon" href="">
+    <link id="dynamic-manifest" rel="manifest" href="">
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -66,8 +74,24 @@
             Lock, KeyRound, Tag, Phone, Mail, MessageSquare, Archive, Download, 
             History, BarChart3, Calendar, AlertTriangle, Filter, ArrowUp, ArrowDown,
             EyeOff, RotateCcw, LayoutList, Layers, FileSpreadsheet, User, Upload,
-            Check, Map, Footprints, FileText, GripVertical
+            Check, Map, Footprints, FileText, GripVertical, Smartphone, MessageCircle
         } from 'lucide-react';
+
+        // --- PWA Dynamisches Manifest generieren ---
+        const svgIcon = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%23db2777'/%3E%3Ctext x='50%25' y='50%25' fill='white' font-size='280' font-family='sans-serif' font-weight='bold' text-anchor='middle' dominant-baseline='central'%3EM%3C/text%3E%3C/svg%3E`;
+        const manifest = {
+            name: "MABELLE Order System",
+            short_name: "MABELLE",
+            description: "Internes Bestellsystem",
+            start_url: window.location.pathname,
+            display: "standalone",
+            background_color: "#f8fafc",
+            theme_color: "#db2777",
+            icons: [{ src: svgIcon, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }]
+        };
+        const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+        document.getElementById('dynamic-manifest').href = URL.createObjectURL(manifestBlob);
+        document.getElementById('dynamic-apple-icon').href = svgIcon;
 
         // --- FIREBASE KONFIGURATION ---
         const firebaseConfig = {
@@ -331,7 +355,7 @@
             const [currentSup, setCurrentSup] = useState(null);
             const [draggedIndex, setDraggedIndex] = useState(null);
 
-            const emptySup = { name: '', phone: '', email: '', customerNumber: '', ourName: '', orderMethod: 'direct', sortOrder: 100 };
+            const emptySup = { name: '', phone: '', email: '', whatsapp: '', customerNumber: '', ourName: '', orderMethod: 'direct', sortOrder: 100 };
             const handleEdit = (sup) => { setCurrentSup({ ...sup }); setIsEditing(true); };
             const handleAddNew = () => { 
                 const maxOrder = suppliers.length > 0 ? Math.max(...suppliers.map(s => s.sortOrder || 0)) : 0;
@@ -347,6 +371,7 @@
                     name: currentSup.name, 
                     phone: currentSup.phone||'', 
                     email: currentSup.email||'', 
+                    whatsapp: currentSup.whatsapp||'',
                     customerNumber: currentSup.customerNumber||'', 
                     ourName: currentSup.ourName||'', 
                     orderMethod: currentSup.orderMethod||'direct',
@@ -405,9 +430,9 @@
                 setDraggedIndex(null);
             };
 
-            if (isEditing) return (<div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between mb-6"><h2 className="text-xl font-bold">Lieferant bearbeiten</h2><button onClick={() => setIsEditing(false)}><X/></button></div><div className="space-y-4"><input className="w-full border p-2 rounded" value={currentSup.name} onChange={e=>setCurrentSup({...currentSup, name: e.target.value})} placeholder="Name"/><input className="w-full border p-2 rounded" value={currentSup.phone} onChange={e=>setCurrentSup({...currentSup, phone: e.target.value})} placeholder="Telefon"/><input className="w-full border p-2 rounded" value={currentSup.email} onChange={e=>setCurrentSup({...currentSup, email: e.target.value})} placeholder="Email"/><div className="grid grid-cols-2 gap-4"><input className="border p-2 rounded" value={currentSup.customerNumber||''} onChange={e=>setCurrentSup({...currentSup, customerNumber: e.target.value})} placeholder="Kd-Nr"/><input className="border p-2 rounded" value={currentSup.ourName||''} onChange={e=>setCurrentSup({...currentSup, ourName: e.target.value})} placeholder="Unser Name"/></div><div className="flex gap-4"><button onClick={()=>setCurrentSup({...currentSup, orderMethod:'direct'})} className={`flex-1 p-3 border rounded ${currentSup.orderMethod==='direct'?'bg-pink-50 border-pink-500':''}`}>
+            if (isEditing) return (<div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between mb-6"><h2 className="text-xl font-bold">Lieferant bearbeiten</h2><button onClick={() => setIsEditing(false)}><X/></button></div><div className="space-y-4"><input className="w-full border p-2 rounded" value={currentSup.name} onChange={e=>setCurrentSup({...currentSup, name: e.target.value})} placeholder="Name"/><input className="w-full border p-2 rounded" value={currentSup.phone} onChange={e=>setCurrentSup({...currentSup, phone: e.target.value})} placeholder="Telefon"/><input className="w-full border p-2 rounded" value={currentSup.whatsapp||''} onChange={e=>setCurrentSup({...currentSup, whatsapp: e.target.value})} placeholder="WhatsApp Nr. (z.B. 491701234567)"/><input className="w-full border p-2 rounded" value={currentSup.email} onChange={e=>setCurrentSup({...currentSup, email: e.target.value})} placeholder="Email"/><div className="grid grid-cols-2 gap-4"><input className="border p-2 rounded" value={currentSup.customerNumber||''} onChange={e=>setCurrentSup({...currentSup, customerNumber: e.target.value})} placeholder="Kd-Nr"/><input className="border p-2 rounded" value={currentSup.ourName||''} onChange={e=>setCurrentSup({...currentSup, ourName: e.target.value})} placeholder="Unser Name"/></div><div className="flex gap-4"><button onClick={()=>setCurrentSup({...currentSup, orderMethod:'direct'})} className={`flex-1 p-3 border rounded ${currentSup.orderMethod==='direct'?'bg-pink-50 border-pink-500':''}`}>
             <FileText className="w-5 h-5"/>
-            <span className="text-xs font-bold">Direkt (PDF)</span>
+            <span className="text-xs font-bold">Direkt (PDF/WA)</span>
             </button><button onClick={()=>setCurrentSup({...currentSup, orderMethod:'shopping'})} className={`flex-1 p-3 border rounded ${currentSup.orderMethod==='shopping'?'bg-pink-50 border-pink-500':''}`}>
             <ShoppingCart className="w-5 h-5"/>
             <span className="text-xs font-bold">Einkaufsliste</span>
@@ -781,7 +806,83 @@
         );
         };
 
-        const StatisticsView = ({ orders, onPrint }) => { return <div className="p-8 text-center text-slate-500">Statistik Modul aktiv</div>; }; 
+        // --- FIX: Vollständige Implementierung der Statistiken ---
+        const StatisticsView = ({ orders }) => {
+            if (!orders || orders.length === 0) {
+                return <div className="p-8 text-center text-slate-500 mt-10">Noch keine Daten für Statistiken vorhanden.</div>;
+            }
+
+            // Berechnungen durchführen
+            const totalOrders = orders.length;
+            const deptCounts = { kitchen: 0, bar: 0, shisha: 0 };
+            const itemFrequency = {};
+
+            orders.forEach(order => {
+                // Abteilungen hochzählen
+                if (order.department && deptCounts[order.department] !== undefined) {
+                    deptCounts[order.department]++;
+                } else if (order.department) {
+                    deptCounts[order.department] = (deptCounts[order.department] || 0) + 1;
+                }
+
+                // Artikel hochzählen
+                order.items.forEach(item => {
+                    const key = `${item.name} (${item.unit})`;
+                    if (!itemFrequency[key]) itemFrequency[key] = { name: item.name, unit: item.unit, qty: 0, count: 0 };
+                    itemFrequency[key].qty += Number(item.quantity) || 0;
+                    itemFrequency[key].count += 1;
+                });
+            });
+
+            // Die Top 10 meistbestellten Artikel nach Menge
+            const topItems = Object.values(itemFrequency)
+                .sort((a, b) => b.qty - a.qty)
+                .slice(0, 10);
+
+            return (
+                <div className="space-y-6">
+                    <h2 className="text-xl font-bold text-slate-800 mb-4">Statistiken & Auswertungen</h2>
+                    
+                    {/* Metrics Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                            <div className="text-slate-500 text-sm font-bold mb-1">Gesamtbestellungen</div>
+                            <div className="text-3xl font-black text-slate-800">{totalOrders}</div>
+                        </div>
+                        <div className="bg-blue-50 p-4 rounded-xl shadow-sm border border-blue-100">
+                            <div className="text-blue-600 text-sm font-bold mb-1 flex items-center gap-2"><ChefHat className="w-4 h-4"/> Küche</div>
+                            <div className="text-3xl font-black text-blue-800">{deptCounts.kitchen}</div>
+                        </div>
+                        <div className="bg-purple-50 p-4 rounded-xl shadow-sm border border-purple-100">
+                            <div className="text-purple-600 text-sm font-bold mb-1 flex items-center gap-2"><Wine className="w-4 h-4"/> Bar</div>
+                            <div className="text-3xl font-black text-purple-800">{deptCounts.bar}</div>
+                        </div>
+                        <div className="bg-orange-50 p-4 rounded-xl shadow-sm border border-orange-100">
+                            <div className="text-orange-600 text-sm font-bold mb-1 flex items-center gap-2"><Cloud className="w-4 h-4"/> Shisha</div>
+                            <div className="text-3xl font-black text-orange-800">{deptCounts.shisha}</div>
+                        </div>
+                    </div>
+
+                    {/* Top Items List */}
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mt-6">
+                        <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 font-bold text-slate-700 flex items-center gap-2">
+                            <BarChart3 className="w-5 h-5 text-slate-500"/> Top 10 meistbestellte Artikel (Menge)
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                            {topItems.map((item, idx) => (
+                                <div key={idx} className="flex justify-between items-center p-4 hover:bg-slate-50">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-6 text-center font-bold text-slate-400">{idx + 1}.</div>
+                                        <div className="font-medium text-slate-800">{item.name}</div>
+                                    </div>
+                                    <div className="font-bold text-lg text-pink-600">{item.qty} <span className="text-sm font-normal text-slate-500">{item.unit}</span></div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }; 
 
         // --- FIX: Missing component stub based on usage in OfficeView ---
         const StatsPrintView = ({ data, onClose }) => { return <div className="p-8 text-center text-slate-500">Statistik Druckansicht (Platzhalter)</div>; };
@@ -951,7 +1052,7 @@
         );
         };
 
-        const RoleSelection = ({ onSelectRole, appId }) => {
+        const RoleSelection = ({ onSelectRole, appId, installPrompt, onInstall }) => {
         const [showPinModal, setShowPinModal] = useState(false);
         const [pinInput, setPinInput] = useState("");
         const [error, setError] = useState("");
@@ -971,6 +1072,14 @@
                 <div className="my-2 border-t border-slate-100"></div>
                 <button onClick={handleOfficeClick} className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 rounded-xl group"><div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center"><ClipboardList className="w-6 h-6 text-emerald-600" /></div><div className="text-left"><h3 className="text-lg font-bold text-slate-800">Büro</h3><p className="text-xs text-slate-500">Verwaltung & Einkauf</p></div></button>
                 </div>
+
+                {/* PWA Install Button (erscheint nur, wenn der Browser es unterstützt) */}
+                {installPrompt && (
+                    <button onClick={onInstall} className="mt-8 mx-auto flex items-center gap-2 px-6 py-3 bg-pink-50 text-pink-700 border border-pink-200 rounded-xl font-bold shadow-sm hover:bg-pink-100 transition-colors">
+                        <Smartphone className="w-5 h-5" /> App installieren
+                    </button>
+                )}
+
             </div>
             {showPinModal && (<div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl p-6 w-full max-w-sm flex flex-col items-center"><div className="flex justify-between items-center w-full mb-6"><h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Lock className="w-5 h-5 text-emerald-600"/> Büro Login</h3><button onClick={() => setShowPinModal(false)} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-5 h-5 text-slate-400"/></button></div><div className="w-full text-center text-4xl font-bold tracking-[0.5em] p-4 border-2 border-slate-200 rounded-xl bg-slate-50 mb-4 h-20 flex items-center justify-center text-slate-800">{pinInput.split('').map(() => '●').join('')}</div>{error && <p className="text-red-500 text-center mb-2 font-bold">{error}</p>}<Numpad onDigit={handleDigit} onClear={handleClear} onEnter={handleEnter} /></div></div>)}
             </div>
@@ -1147,6 +1256,26 @@
         const [showPinChangeModal, setShowPinChangeModal] = useState(false);
         const [newPin, setNewPin] = useState("");
         const [editingItem, setEditingItem] = useState(null); // NEU: State für Bearbeitung
+
+        // --- NEU: WhatsApp Senden Funktion ---
+        const handleWhatsAppOrder = (supplierName, items, whatsappNumber, supplierConfig, notes) => {
+            let text = `*Bestellung MABELLE*\nDatum: ${new Date().toLocaleDateString('de-DE')}\n`;
+            if (supplierConfig.customerNumber) text += `Kd-Nr: ${supplierConfig.customerNumber}\n`;
+            if (supplierConfig.ourName) text += `Besteller: ${supplierConfig.ourName}\n`;
+            
+            if (notes && notes.length > 0) {
+                text += `\n*Hinweise:*\n${notes.map(n => `- ${n}`).join('\n')}\n`;
+            }
+
+            text += `\n*Artikel:*\n`;
+            items.forEach(item => {
+                text += `• ${item.quantity} ${item.unit} ${item.name}\n`;
+            });
+
+            const encodedText = encodeURIComponent(text);
+            const cleanNumber = whatsappNumber.replace(/[^0-9]/g, '');
+            window.open(`https://wa.me/${cleanNumber}?text=${encodedText}`, '_blank');
+        };
 
         useEffect(() => {
             if (!user) return;
@@ -1377,7 +1506,7 @@
                 {activeTab === 'products' ? <ProductManager products={products} categories={categories} suppliers={suppliers} appId={appId} /> :
                 activeTab === 'categories' ? <CategoryManager categories={categories} appId={appId} /> :
                 activeTab === 'suppliers' ? <SupplierManager suppliers={suppliers} appId={appId} /> :
-                activeTab === 'statistics' ? <StatisticsView orders={orders} onPrint={setStatsPrintData} appId={appId} /> :
+                activeTab === 'statistics' ? <StatisticsView orders={orders} /> :
                 (
                     <div className="space-y-6">
                         {activeTab === 'history' && (<div className="flex justify-end"><button onClick={exportToCSV} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg font-bold shadow-sm hover:bg-green-700 transition-all"><Download className="w-4 h-4"/> Excel Export</button></div>)}
@@ -1396,7 +1525,13 @@
                                     <div key={sup} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                                         <div className="bg-slate-50 px-4 py-3 border-b flex justify-between items-center">
                                             <div className="font-bold text-slate-800 flex items-center gap-2">{sup === 'Hamberger' ? <Store className="w-5 h-5 text-slate-500"/> : <Truck className="w-5 h-5 text-slate-500"/>}{sup}<span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full text-xs">{items.length} Artikel</span></div>
-                                            <div className="flex gap-2"><button onClick={() => setPrintData({ items, supplier: sup, date: new Date(), orderId: '', department: '', note: '' })} className="p-2 bg-white border rounded hover:bg-slate-50"><Printer className="w-6 h-6 text-slate-600"/></button>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => setPrintData({ items, supplier: sup, date: new Date(), orderId: '', department: '', note: '' })} className="p-2 bg-white border rounded hover:bg-slate-50"><Printer className="w-6 h-6 text-slate-600"/></button>
+                                                {supplierConfig.whatsapp && (
+                                                    <button onClick={() => handleWhatsAppOrder(sup, items, supplierConfig.whatsapp, supplierConfig, uniqueNotes)} className="flex items-center gap-2 px-3 py-2 bg-green-500 text-white rounded font-bold hover:bg-green-600 text-sm">
+                                                        <MessageCircle className="w-4 h-4"/> WA
+                                                    </button>
+                                                )}
                                                 {isShopping ? (<button onClick={() => setShoppingData({ items, supplier: sup })} className="flex items-center gap-2 px-3 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600 text-sm"><ShoppingCart className="w-4 h-4"/> Einkaufen</button>) : (<button onClick={() => completeDirectOrder(sup)} className="flex items-center gap-2 px-3 py-2 bg-white border border-green-500 text-green-600 rounded font-bold hover:bg-green-50 text-sm"><Check className="w-5 h-5"/> Erledigt</button>)}
                                             </div>
                                         </div>
@@ -1490,6 +1625,26 @@
             const [products, setProducts] = useState([]);
             const [categories, setCategories] = useState([]);
             const [suppliers, setSuppliers] = useState([]);
+            const [installPrompt, setInstallPrompt] = useState(null);
+
+            // --- PWA: Install Prompt Listener ---
+            useEffect(() => {
+                const handleBeforeInstallPrompt = (e) => {
+                    e.preventDefault(); // Verhindert den automatischen Browser-Dialog
+                    setInstallPrompt(e);
+                };
+                window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+                return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+            }, []);
+
+            const handleInstallClick = async () => {
+                if (!installPrompt) return;
+                installPrompt.prompt();
+                const { outcome } = await installPrompt.userChoice;
+                if (outcome === 'accepted') {
+                    setInstallPrompt(null);
+                }
+            };
 
             useEffect(() => {
                 const initAuth = async () => {
@@ -1545,7 +1700,7 @@
 
             if (!authInitialized) return <Loading />;
             if (!user) return <div className="h-screen flex items-center justify-center text-slate-500">Bitte anmelden...</div>;
-            if (!role) return <RoleSelection onSelectRole={setRole} appId={appId} />;
+            if (!role) return <RoleSelection onSelectRole={setRole} appId={appId} installPrompt={installPrompt} onInstall={handleInstallClick} />;
             
             if (role === 'office') {
                 return <OfficeView user={user} appId={appId} products={products} categories={categories} suppliers={suppliers} onLogout={() => setRole(null)} />;
