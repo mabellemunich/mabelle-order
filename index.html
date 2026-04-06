@@ -7,16 +7,46 @@
     
     <!-- PWA Meta Tags für iOS & Android -->
     <meta name="theme-color" content="#db2777">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="MABELLE">
     <link id="dynamic-apple-icon" rel="apple-touch-icon" href="">
     <link id="dynamic-manifest" rel="manifest" href="">
+
+    <!-- FIX: App-Manifest & Service Worker sofort im Head laden, damit das Tablet es direkt als App erkennt -->
+    <script>
+        // 1. Manifest sofort generieren
+        const svgIcon = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%23db2777'/%3E%3Ctext x='50%25' y='50%25' fill='white' font-size='280' font-family='sans-serif' font-weight='bold' text-anchor='middle' dominant-baseline='central'%3EM%3C/text%3E%3C/svg%3E`;
+        const manifest = {
+            name: "MABELLE Order System",
+            short_name: "MABELLE",
+            description: "Internes Bestellsystem",
+            start_url: window.location.pathname, // FIX: Gültige URL für das Manifest
+            display: "standalone",
+            background_color: "#f8fafc",
+            theme_color: "#db2777",
+            icons: [{ src: svgIcon, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }]
+        };
+        document.getElementById('dynamic-manifest').href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifest));
+        document.getElementById('dynamic-apple-icon').href = svgIcon;
+
+        // 2. Service Worker registrieren (Optional für PWA-Erkennung)
+        // HINWEIS: Service Worker erlauben aus Sicherheitsgründen keine "blob:" URLs.
+        // Um echtes Offline-Caching zu aktivieren, lade eine leere Datei "sw.js" auf deinen Webspace hoch.
+        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch(() => {
+                    // Wird leise ignoriert, wenn keine sw.js vorhanden ist
+                });
+            });
+        }
+    </script>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Babel für JSX - FIX: Version fixiert, um Fehler zu vermeiden -->
+    <!-- Babel für JSX -->
     <script src="https://unpkg.com/@babel/standalone@7.24.4/babel.min.js"></script>
 
     <!-- Import Map für Module -->
@@ -36,7 +66,6 @@
 <body class="bg-slate-100 text-slate-900">
     <div id="root"></div>
 
-    <!-- FIX: data-presets="react" hinzugefügt, um den 'esmodules' Fehler zu beheben -->
     <script type="text/babel" data-type="module" data-presets="react">
         import React, { useState, useEffect } from 'react';
         import { createRoot } from 'react-dom/client';
@@ -64,7 +93,7 @@
             getDocs, 
             where, 
             arrayUnion,
-            runTransaction // Wichtig für sicheres Editieren von Array-Items
+            runTransaction
         } from 'firebase/firestore';
         import { 
             ChefHat, ClipboardList, Plus, Minus, ShoppingCart, Send, CheckCircle, 
@@ -75,24 +104,8 @@
             History, BarChart3, Calendar, AlertTriangle, Filter, ArrowUp, ArrowDown,
             EyeOff, RotateCcw, LayoutList, Layers, FileSpreadsheet, User, Upload,
             Check, Map, Footprints, FileText, GripVertical, Smartphone, MessageCircle,
-            Sparkles, Loader2 // NEU: Icons für KI
+            Sparkles, Loader2
         } from 'lucide-react';
-
-        // --- PWA Dynamisches Manifest generieren ---
-        const svgIcon = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%23db2777'/%3E%3Ctext x='50%25' y='50%25' fill='white' font-size='280' font-family='sans-serif' font-weight='bold' text-anchor='middle' dominant-baseline='central'%3EM%3C/text%3E%3C/svg%3E`;
-        const manifest = {
-            name: "MABELLE Order System",
-            short_name: "MABELLE",
-            description: "Internes Bestellsystem",
-            start_url: window.location.pathname,
-            display: "standalone",
-            background_color: "#f8fafc",
-            theme_color: "#db2777",
-            icons: [{ src: svgIcon, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }]
-        };
-        const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-        document.getElementById('dynamic-manifest').href = URL.createObjectURL(manifestBlob);
-        document.getElementById('dynamic-apple-icon').href = svgIcon;
 
         // --- FIREBASE KONFIGURATION ---
         const firebaseConfig = {
@@ -104,13 +117,16 @@
             appId: "1:151693763454:web:e42600a984ba87f233492f"
         };
 
+        // --- KI KONFIGURATION ---
+        // FIX: Trage hier deinen eigenen kostenlosen Gemini API Key ein (erhältlich unter: aistudio.google.com)
+        const GEMINI_API_KEY = ""; 
+
         // --- Initialisierung ---
         const appConfig = (typeof window.__firebase_config !== 'undefined') ? JSON.parse(window.__firebase_config) : firebaseConfig;
         const app = initializeApp(appConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // App ID
         const appId = (typeof window.__app_id !== 'undefined') ? window.__app_id : "mabell-order-system";
 
         // --- Data & Constants ---
@@ -134,7 +150,6 @@
             'shisha': 'Shisha'
         };
 
-        // --- Helper Functions ---
         const formatDate = (timestamp) => {
         if (!timestamp) return 'Gerade eben';
         const date = timestamp.toDate ? timestamp.toDate() : new Date();
@@ -149,10 +164,15 @@
 
         // --- KI Service ---
         const fetchAIsuggestion = async (productName, categories) => {
-            const apiKey = ""; // Umgebung liefert den Key zur Laufzeit
+            // Hole API Key (entweder aus Umgebung oder Konstante)
+            const apiKey = typeof window.__gemini_api_key !== 'undefined' ? window.__gemini_api_key : GEMINI_API_KEY;
+            
+            if (!apiKey) {
+                throw new Error("NO_API_KEY");
+            }
+
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
-            // Kategorien für die KI vereinfachen
             const categoriesList = categories.map(c => ({ 
                 id: c.id, 
                 name: c.name, 
@@ -603,7 +623,11 @@
                 }
             } catch (e) {
                 console.error(e);
-                setAiMessage({ type: 'error', text: 'KI konnte leider keinen Vorschlag machen.' });
+                if (e.message === "NO_API_KEY") {
+                    setAiMessage({ type: 'error', text: 'KI-Funktion nicht nutzbar: Kein API-Key hinterlegt (siehe Code).' });
+                } else {
+                    setAiMessage({ type: 'error', text: 'KI konnte leider keinen Vorschlag machen.' });
+                }
             } finally {
                 setIsAILoading(false);
             }
