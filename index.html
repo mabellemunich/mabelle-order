@@ -109,7 +109,7 @@
         // =====================================================================
         // ⚠️ KI KONFIGURATION - API KEY
         // =====================================================================
-        const GEMINI_API_KEY = "AIzaSyBQSrS2V9VHf2EbhjDo9Rv636NDaxqN94k"; 
+        const GEMINI_API_KEY = "AIzaSyBMHWxvqn_0J37FMxMGJHCWAGyI6V_KYHs"; 
         // =====================================================================
 
         // --- Initialisierung ---
@@ -155,14 +155,14 @@
 
         // --- KI Service ---
         const fetchAIsuggestion = async (productName, categories) => {
-            const apiKey = typeof window.__gemini_api_key !== 'undefined' ? window.__gemini_api_key : GEMINI_API_KEY;
+            // WICHTIG: In dieser Arbeitsumgebung MUSS der API Key zwingend leer sein.
+            // Für deinen eigenen GitHub Pages Webspace, ändere die Zeile zu:
+            // const apiKey = "AIzaSyBQSrS2V9VHf2EbhjDo9Rv636NDaxqN94k";
+            const apiKey = "";
             
-            if (!apiKey || apiKey.trim() === "") {
-                throw new Error("NO_API_KEY");
-            }
-
-            // KORREKTES MODELL HINTERLEGT
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+            // WICHTIG: In dieser Arbeitsumgebung MUSS zwingend dieses Preview-Modell verwendet werden.
+            // Falls dieses Modell auf GitHub Pages 403/404 Fehler wirft, ändere es dort zu 'gemini-1.5-flash-latest'
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
             const categoriesList = categories.map(c => ({ 
                 id: c.id, 
