@@ -14,7 +14,7 @@
     <link id="dynamic-apple-icon" rel="apple-touch-icon" href="">
     <link id="dynamic-manifest" rel="manifest" href="">
 
-    <!-- FIX: App-Manifest & Service Worker sofort im Head laden, damit das Tablet es direkt als App erkennt -->
+    <!-- App-Manifest & Service Worker Registrierung -->
     <script>
         // 1. Manifest sofort generieren
         const svgIcon = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%23db2777'/%3E%3Ctext x='50%25' y='50%25' fill='white' font-size='280' font-family='sans-serif' font-weight='bold' text-anchor='middle' dominant-baseline='central'%3EM%3C/text%3E%3C/svg%3E`;
@@ -22,7 +22,7 @@
             name: "MABELLE Order System",
             short_name: "MABELLE",
             description: "Internes Bestellsystem",
-            start_url: window.location.pathname, // FIX: Gültige URL für das Manifest
+            start_url: window.location.pathname, 
             display: "standalone",
             background_color: "#f8fafc",
             theme_color: "#db2777",
@@ -31,13 +31,11 @@
         document.getElementById('dynamic-manifest').href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifest));
         document.getElementById('dynamic-apple-icon').href = svgIcon;
 
-        // 2. Service Worker registrieren (Optional für PWA-Erkennung)
-        // HINWEIS: Service Worker erlauben aus Sicherheitsgründen keine "blob:" URLs.
-        // Um echtes Offline-Caching zu aktivieren, lade eine leere Datei "sw.js" auf deinen Webspace hoch.
+        // 2. Service Worker registrieren (Sucht nun nach der sw.js Datei)
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js').catch(() => {
-                    // Wird leise ignoriert, wenn keine sw.js vorhanden ist
+                navigator.serviceWorker.register('./sw.js').catch((err) => {
+                    console.log('Service Worker Registrierung fehlgeschlagen (Datei fehlt evtl.):', err);
                 });
             });
         }
@@ -117,9 +115,13 @@
             appId: "1:151693763454:web:e42600a984ba87f233492f"
         };
 
-        // --- KI KONFIGURATION ---
-        // FIX: Trage hier deinen eigenen kostenlosen Gemini API Key ein (erhältlich unter: aistudio.google.com)
-        const GEMINI_API_KEY = ""; 
+        // =====================================================================
+        // ⚠️ KI KONFIGURATION - HIER API KEY EINTRAGEN ⚠️
+        // Gehe zu: https://aistudio.google.com/app/apikey
+        // Klicke auf "Create API key", kopiere ihn und füge ihn hier ein:
+        // =====================================================================
+        const GEMINI_API_KEY = "AIzaSyBQSrS2V9VHf2EbhjDo9Rv636NDaxqN94k"; 
+        // =====================================================================
 
         // --- Initialisierung ---
         const appConfig = (typeof window.__firebase_config !== 'undefined') ? JSON.parse(window.__firebase_config) : firebaseConfig;
@@ -164,10 +166,9 @@
 
         // --- KI Service ---
         const fetchAIsuggestion = async (productName, categories) => {
-            // Hole API Key (entweder aus Umgebung oder Konstante)
             const apiKey = typeof window.__gemini_api_key !== 'undefined' ? window.__gemini_api_key : GEMINI_API_KEY;
             
-            if (!apiKey) {
+            if (!apiKey || apiKey.trim() === "") {
                 throw new Error("NO_API_KEY");
             }
 
@@ -624,7 +625,7 @@
             } catch (e) {
                 console.error(e);
                 if (e.message === "NO_API_KEY") {
-                    setAiMessage({ type: 'error', text: 'KI-Funktion nicht nutzbar: Kein API-Key hinterlegt (siehe Code).' });
+                    setAiMessage({ type: 'error', text: 'KI nicht nutzbar: Bitte trage deinen kostenlosen Gemini API-Key im Code (Zeile 92) ein. Du bekommst ihn unter aistudio.google.com' });
                 } else {
                     setAiMessage({ type: 'error', text: 'KI konnte leider keinen Vorschlag machen.' });
                 }
