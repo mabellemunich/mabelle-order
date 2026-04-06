@@ -74,7 +74,8 @@
             Lock, KeyRound, Tag, Phone, Mail, MessageSquare, Archive, Download, 
             History, BarChart3, Calendar, AlertTriangle, Filter, ArrowUp, ArrowDown,
             EyeOff, RotateCcw, LayoutList, Layers, FileSpreadsheet, User, Upload,
-            Check, Map, Footprints, FileText, GripVertical, Smartphone, MessageCircle
+            Check, Map, Footprints, FileText, GripVertical, Smartphone, MessageCircle,
+            Sparkles, Loader2 // NEU: Icons für KI
         } from 'lucide-react';
 
         // --- PWA Dynamisches Manifest generieren ---
@@ -104,7 +105,6 @@
         };
 
         // --- Initialisierung ---
-        // Prüfen, ob eine Umgebungskonfiguration vorhanden ist, sonst Standard verwenden
         const appConfig = (typeof window.__firebase_config !== 'undefined') ? JSON.parse(window.__firebase_config) : firebaseConfig;
         const app = initializeApp(appConfig);
         const auth = getAuth(app);
@@ -114,7 +114,6 @@
         const appId = (typeof window.__app_id !== 'undefined') ? window.__app_id : "mabell-order-system";
 
         // --- Data & Constants ---
-
         const DEFAULT_PIN = "311088";
 
         const ICON_MAP = {
@@ -148,6 +147,63 @@
         return new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(date);
         };
 
+        // --- KI Service ---
+        const fetchAIsuggestion = async (productName, categories) => {
+            const apiKey = ""; // Umgebung liefert den Key zur Laufzeit
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            // Kategorien für die KI vereinfachen
+            const categoriesList = categories.map(c => ({ 
+                id: c.id, 
+                name: c.name, 
+                department: Array.isArray(c.allowedRoles) ? c.allowedRoles[0] : c.allowedRoles 
+            }));
+
+            const payload = {
+                contents: [{ 
+                    parts: [{ 
+                        text: `Artikelname: "${productName}"\n\nVerfügbare Kategorien:\n${JSON.stringify(categoriesList)}` 
+                    }] 
+                }],
+                systemInstruction: { 
+                    parts: [{ 
+                        text: "Du bist ein KI-Assistent für ein Gastro-Warenwirtschaftssystem. Ordne den Artikelnamen einer passenden Kategorie zu. Wenn eine der vorhandenen Kategorien inhaltlich gut passt, setze isNew auf false und gib deren categoryId an. Wenn absolut KEINE Kategorie passt, setze isNew auf true, erfinde einen passenden, kurzen Kategorienamen für newCatName (z.B. 'Reinigung', 'Sirup', 'Frucht-Tabak') und wähle die logisch passendste Abteilung ('kitchen', 'bar' oder 'shisha') für newCatDept. Antworte immer streng im vorgegebenen JSON-Format." 
+                    }] 
+                },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            isNew: { type: "BOOLEAN" },
+                            categoryId: { type: "STRING" },
+                            newCatName: { type: "STRING" },
+                            newCatDept: { type: "STRING" }
+                        },
+                        required: ["isNew"]
+                    }
+                }
+            };
+
+            let delays = [1000, 2000, 4000, 8000, 16000];
+            for (let i = 0; i < 6; i++) {
+                try {
+                    const response = await fetch(url, { 
+                        method: "POST", 
+                        headers: { "Content-Type": "application/json" }, 
+                        body: JSON.stringify(payload) 
+                    });
+                    if (!response.ok) throw new Error("API Error");
+                    const data = await response.json();
+                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if(text) return JSON.parse(text);
+                } catch (err) {
+                    if (i === 5) throw err;
+                    await new Promise(r => setTimeout(r, delays[i]));
+                }
+            }
+        };
+
         // --- Custom Icons ---
         const WhatsAppIcon = ({ className }) => (
             <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -156,7 +212,6 @@
         );
 
         // --- Components ---
-
         const Loading = () => (
         <div className="flex flex-col items-center justify-center h-screen bg-slate-50 text-slate-600">
             <RefreshCw className="w-10 h-10 animate-spin mb-4 text-pink-600" />
@@ -177,7 +232,6 @@
         );
         };
 
-        // --- Edit Item Modal ---
         const EditItemModal = ({ item, suppliers, onClose, onSave }) => {
             const [qty, setQty] = useState(item.quantity);
             const [sup, setSup] = useState(item.supplier || '');
@@ -227,8 +281,6 @@
             );
         };
 
-        // --- MANAGEMENT COMPONENTS ---
-
         const CategoryManager = ({ categories, appId }) => {
         const [isEditing, setIsEditing] = useState(false);
         const [currentCat, setCurrentCat] = useState(null);
@@ -270,7 +322,6 @@
 
         const handleDelete = async (id) => { if (confirm("Gruppe wirklich löschen?")) try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', id)); } catch (e) { alert("Fehler"); } };
         
-        // --- DRAG & DROP FÜR KATEGORIEN ---
         const handleDragStart = (e, id) => {
             setDraggedCatId(id);
             e.dataTransfer.effectAllowed = "move";
@@ -484,12 +535,15 @@
         const [importTarget, setImportTarget] = useState('shisha'); 
         const [selectedProducts, setSelectedProducts] = useState([]);
         
-        // Drag state for products
+        // KI State
+        const [isAILoading, setIsAILoading] = useState(false);
+        const [aiMessage, setAiMessage] = useState(null);
+        
         const [draggedProdId, setDraggedProdId] = useState(null);
         
         const emptyProduct = { name: '', unit: 'Stk', category: '', supplier: '', department: 'kitchen', targetStock: 0, sortOrder: 100, aisle: '' };
 
-        const handleEdit = (product) => { setCurrentProduct({ ...product }); setIsEditing(true); };
+        const handleEdit = (product) => { setCurrentProduct({ ...product }); setIsEditing(true); setAiMessage(null); };
         
         const getCategoriesForDept = (dept) => {
             return categories.filter(c => Array.isArray(c.allowedRoles) && c.allowedRoles.includes(dept));
@@ -508,6 +562,7 @@
                 supplier: defaultSup
             }); 
             setIsEditing(true); 
+            setAiMessage(null);
         };
         
         const handleEditDepartmentChange = (e) => {
@@ -515,6 +570,63 @@
             const validCats = getCategoriesForDept(newDept);
             const newCat = validCats.length > 0 ? validCats[0].id : '';
             setCurrentProduct({ ...currentProduct, department: newDept, category: newCat });
+        };
+
+        // --- KI Funktion auslösen ---
+        const handleAISuggestion = async () => {
+            if (!currentProduct.name || currentProduct.name.trim() === '') {
+                setAiMessage({ type: 'error', text: 'Bitte zuerst einen Artikelnamen eingeben!' });
+                return;
+            }
+            
+            setIsAILoading(true);
+            setAiMessage(null);
+            
+            try {
+                const res = await fetchAIsuggestion(currentProduct.name, categories);
+                
+                if (!res.isNew && res.categoryId) {
+                    const found = categories.find(c => c.id === res.categoryId);
+                    if (found) {
+                        const dept = Array.isArray(found.allowedRoles) ? found.allowedRoles[0] : 'kitchen';
+                        setCurrentProduct(prev => ({...prev, category: res.categoryId, department: dept}));
+                        setAiMessage({ type: 'success', text: `Kategorie '${found.name}' wurde automatisch ausgewählt.` });
+                    } else {
+                        setAiMessage({ type: 'error', text: 'Kategorie nicht gefunden.' });
+                    }
+                } else if (res.isNew && res.newCatName) {
+                    setAiMessage({ 
+                        type: 'suggestion', 
+                        text: `KI Vorschlag für neue Kategorie: "${res.newCatName}" in der Abteilung "${DEPT_NAMES[res.newCatDept] || res.newCatDept}"`,
+                        suggestion: res
+                    });
+                }
+            } catch (e) {
+                console.error(e);
+                setAiMessage({ type: 'error', text: 'KI konnte leider keinen Vorschlag machen.' });
+            } finally {
+                setIsAILoading(false);
+            }
+        };
+
+        const applyNewAICategory = async (suggestion) => {
+            try {
+                const catData = { 
+                    name: suggestion.newCatName, 
+                    iconKey: 'tag', 
+                    allowedRoles: [suggestion.newCatDept], 
+                    sortOrder: 100 
+                };
+                const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), catData);
+                setCurrentProduct(prev => ({
+                    ...prev, 
+                    category: docRef.id, 
+                    department: suggestion.newCatDept
+                }));
+                setAiMessage({ type: 'success', text: `Neue Kategorie angelegt und ausgewählt!` });
+            } catch (e) {
+                setAiMessage({ type: 'error', text: 'Fehler beim Anlegen der Kategorie.' });
+            }
         };
 
         const handleSave = async () => {
@@ -692,30 +804,6 @@
             return a.name.localeCompare(b.name);
         });
 
-        const moveProduct = async (index, direction) => {
-            if (index + direction < 0 || index + direction >= sortedProducts.length) return;
-            const itemA = sortedProducts[index]; 
-            const itemB = sortedProducts[index + direction];
-            
-            let valA = itemB.sortOrder || 100;
-            let valB = itemA.sortOrder || 100;
-
-            if (valA === valB) {
-                if (direction === -1) { 
-                    valA = valB - 5; 
-                    valB = valB + 5;
-                } else {
-                    valA = valB + 5;
-                    valB = valB - 5;
-                }
-            }
-
-            const batch = writeBatch(db);
-            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', itemA.id), { sortOrder: valA });
-            batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', itemB.id), { sortOrder: valB });
-            try { await batch.commit(); } catch(e) {}
-        };
-
         const visibleCategories = categories.filter(c => {
             if (filterDept === 'all') return true;
             return c.allowedRoles?.includes(filterDept);
@@ -727,7 +815,45 @@
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold text-slate-800">Artikel bearbeiten</h2><button onClick={() => setIsEditing(false)}><X/></button></div>
                 <div className="grid gap-4 max-w-xl">
-                <div><label className="block text-sm font-medium mb-1">Name</label><input className="w-full border p-2 rounded" value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} /></div>
+                
+                <div>
+                    <label className="block text-sm font-medium mb-1">Name</label>
+                    <div className="flex gap-2">
+                        <input className="flex-1 border p-2 rounded focus:ring-2 focus:ring-pink-500 outline-none" value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} placeholder="z.B. Apfelminze 200g" />
+                        <button 
+                            onClick={handleAISuggestion} 
+                            disabled={isAILoading}
+                            className="bg-indigo-50 border border-indigo-200 text-indigo-600 px-4 py-2 rounded font-bold hover:bg-indigo-100 flex items-center gap-2 transition-colors disabled:opacity-50"
+                            title="Kategorie von KI vorschlagen lassen"
+                        >
+                            {isAILoading ? <Loader2 className="w-5 h-5 animate-spin"/> : <Sparkles className="w-5 h-5"/>}
+                        </button>
+                    </div>
+                    {/* KI Message Box */}
+                    {aiMessage && (
+                        <div className={`text-sm p-3 rounded-lg mt-2 border ${
+                            aiMessage.type === 'error' ? 'bg-red-50 text-red-600 border-red-200' : 
+                            aiMessage.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 
+                            'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        }`}>
+                            <div className="flex gap-2">
+                                <Sparkles className="w-4 h-4 shrink-0 mt-0.5" />
+                                <div>
+                                    {aiMessage.text}
+                                    {aiMessage.type === 'suggestion' && (
+                                        <button 
+                                            onClick={() => applyNewAICategory(aiMessage.suggestion)}
+                                            className="mt-3 block w-full bg-indigo-600 text-white py-2 px-4 rounded-lg font-bold hover:bg-indigo-700 transition-colors shadow-sm"
+                                        >
+                                            Kategorie anlegen & verwenden
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                     <div><label className="block text-sm font-medium mb-1">Einheit</label><input className="w-full border p-2 rounded" value={currentProduct.unit} onChange={e => setCurrentProduct({...currentProduct, unit: e.target.value})} /></div>
                     <div>
@@ -769,7 +895,6 @@
                     <div className="relative"><Filter className="absolute left-3 top-3 w-4 h-4 text-slate-500" /><select className="pl-9 pr-8 py-2 bg-white border rounded text-sm appearance-none font-medium" value={filterDept} onChange={handleDeptChange}><option value="all">Alle Abt.</option><option value="kitchen">Küche</option><option value="bar">Bar</option><option value="shisha">Shisha</option></select></div>
                     <div className="relative"><Tag className="absolute left-3 top-3 w-4 h-4 text-slate-500" /><select className="pl-9 pr-8 py-2 bg-white border rounded text-sm appearance-none font-medium max-w-[150px]" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}><option value="all">Alle Kat.</option>{visibleCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                     
-                    {/* NEU: Download Button */}
                     <button onClick={exportProductsToCSV} className="flex items-center gap-2 px-4 py-2 bg-slate-200 rounded text-sm font-bold text-slate-700 hover:bg-slate-300" title="Backup herunterladen"><Download className="w-4 h-4" /></button>
                     <button onClick={() => setIsImporting(!isImporting)} className="flex items-center gap-2 px-4 py-2 bg-slate-200 rounded text-sm font-bold"><Upload className="w-4 h-4" /></button>
                     <button onClick={handleAddNew} className="flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded text-sm font-bold"><Plus className="w-4 h-4" /></button>
@@ -813,26 +938,22 @@
         );
         };
 
-        // --- FIX: Vollständige Implementierung der Statistiken ---
         const StatisticsView = ({ orders }) => {
             if (!orders || orders.length === 0) {
                 return <div className="p-8 text-center text-slate-500 mt-10">Noch keine Daten für Statistiken vorhanden.</div>;
             }
 
-            // Berechnungen durchführen
             const totalOrders = orders.length;
             const deptCounts = { kitchen: 0, bar: 0, shisha: 0 };
             const itemFrequency = {};
 
             orders.forEach(order => {
-                // Abteilungen hochzählen
                 if (order.department && deptCounts[order.department] !== undefined) {
                     deptCounts[order.department]++;
                 } else if (order.department) {
                     deptCounts[order.department] = (deptCounts[order.department] || 0) + 1;
                 }
 
-                // Artikel hochzählen
                 order.items.forEach(item => {
                     const key = `${item.name} (${item.unit})`;
                     if (!itemFrequency[key]) itemFrequency[key] = { name: item.name, unit: item.unit, qty: 0, count: 0 };
@@ -841,7 +962,6 @@
                 });
             });
 
-            // Die Top 10 meistbestellten Artikel nach Menge
             const topItems = Object.values(itemFrequency)
                 .sort((a, b) => b.qty - a.qty)
                 .slice(0, 10);
@@ -850,7 +970,6 @@
                 <div className="space-y-6">
                     <h2 className="text-xl font-bold text-slate-800 mb-4">Statistiken & Auswertungen</h2>
                     
-                    {/* Metrics Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                             <div className="text-slate-500 text-sm font-bold mb-1">Gesamtbestellungen</div>
@@ -870,7 +989,6 @@
                         </div>
                     </div>
 
-                    {/* Top Items List */}
                     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mt-6">
                         <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 font-bold text-slate-700 flex items-center gap-2">
                             <BarChart3 className="w-5 h-5 text-slate-500"/> Top 10 meistbestellte Artikel (Menge)
@@ -891,13 +1009,11 @@
             );
         }; 
 
-        // --- FIX: Missing component stub based on usage in OfficeView ---
         const StatsPrintView = ({ data, onClose }) => { return <div className="p-8 text-center text-slate-500">Statistik Druckansicht (Platzhalter)</div>; };
 
         const OrderPrintView = ({ data, onClose, supplierDetails }) => {
         const currentSup = supplierDetails.find(s => s.name === data.supplier) || {};
         
-        // Sammle alle Notizen aus den Items
         const collectedNotes = [];
         const processedOrders = new Set();
         
@@ -926,7 +1042,6 @@
                         </div>
                     </div>
                     
-                    {/* Zeige entweder die übergebene Notiz (einzeln) oder die gesammelten (sammel) */}
                     {(data.note || collectedNotes.length > 0) && (
                     <div className="mb-4 p-3 border border-black bg-gray-50 rounded">
                         <span className="font-bold text-xs uppercase block mb-1">Notizen:</span> 
@@ -954,7 +1069,6 @@
         
         if (!items) return null;
 
-        // Sammle Notizen für den Kopfbereich
         const collectedNotes = [];
         const processedOrders = new Set();
         items.forEach(item => {
@@ -986,7 +1100,6 @@
             
             <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-32">
                 
-                {/* Notizen Bereich */}
                 {collectedNotes.length > 0 && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 mx-2">
                     <h4 className="text-xs font-bold text-yellow-800 uppercase mb-1 flex items-center gap-1"><MessageSquare className="w-3 h-3"/> Wichtige Hinweise:</h4>
@@ -1080,7 +1193,6 @@
                 <button onClick={handleOfficeClick} className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 rounded-xl group"><div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center"><ClipboardList className="w-6 h-6 text-emerald-600" /></div><div className="text-left"><h3 className="text-lg font-bold text-slate-800">Büro</h3><p className="text-xs text-slate-500">Verwaltung & Einkauf</p></div></button>
                 </div>
 
-                {/* PWA Install Button (erscheint nur, wenn der Browser es unterstützt) */}
                 {installPrompt && (
                     <button onClick={onInstall} className="mt-8 mx-auto flex items-center gap-2 px-6 py-3 bg-pink-50 text-pink-700 border border-pink-200 rounded-xl font-bold shadow-sm hover:bg-pink-100 transition-colors">
                         <Smartphone className="w-5 h-5" /> App installieren
@@ -1109,16 +1221,14 @@
         const updateQuantity = (itemId, delta) => { setCart(prev => { const val = Math.max(0, (prev[itemId] || 0) + delta); const n = { ...prev, [itemId]: val }; if (val === 0) delete n[itemId]; return n; }); };
         const updateInventory = (itemId, val, target) => { const stock = parseInt(val); if (isNaN(stock)) { const n = {...shishaInventory}; delete n[itemId]; setShishaInventory(n); return; } setShishaInventory(prev => ({...prev, [itemId]: stock})); };
         
-        // --- FIX: Robustere Berechnung für Shisha-Bestellmenge ---
         const getShishaOrderQty = (itemId, target) => { 
-            // Prüfen, ob eine Eingabe vorliegt (auch 0 ist eine gültige Eingabe)
             const currentStock = shishaInventory[itemId];
             if (currentStock === undefined) return 0; 
             
             const stockNum = parseInt(currentStock);
-            const targetNum = parseInt(target) || 0; // Default auf 0, falls targetStock fehlt
+            const targetNum = parseInt(target) || 0; 
             
-            if (isNaN(stockNum)) return 0; // Sollte durch updateInventory abgefangen sein, aber sicher ist sicher
+            if (isNaN(stockNum)) return 0; 
             
             return Math.max(0, targetNum - stockNum); 
         };
@@ -1197,7 +1307,6 @@
                         {reviewItems.map(i => (<div key={i.id} className="flex justify-between p-4 border rounded-lg"><span>{i.name}</span><span className="font-bold">{i.quantity} {i.unit}</span></div>))}
                         <div className="mt-4"><label className="block text-sm font-bold mb-2">Notiz</label><textarea className="w-full border p-2 rounded" rows="3" value={orderNote} onChange={e => setOrderNote(e.target.value)} placeholder="Zusatzinfo..."></textarea></div>
                     </div>
-                    {/* FIX: Bessere Sichtbarkeit auf Mobile durch fixed Positionierung im Review Screen */}
                     <div className="fixed bottom-0 w-full p-4 bg-white border-t z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]"><button onClick={handleSubmitOrder} disabled={isSubmitting} className="w-full bg-pink-600 text-white py-3 rounded-lg font-bold">Abschicken</button></div>
                 </div>
             );
@@ -1217,7 +1326,6 @@
                             return (
                                 <div key={p.id} className="p-4 bg-white rounded-xl shadow-sm border-l-4 border-slate-200">
                                     <div className="flex justify-between items-center mb-0"><div><div className="font-bold text-lg">{p.name}</div>
-                                    {/* FIX: Soll-Bestand anzeigen für bessere Transparenz */}
                                     <div className="text-xs text-slate-500 font-bold">Soll: {p.targetStock || 0} {p.unit}</div>
                                     </div>
                                     <div className="flex items-center gap-2 justify-end">
@@ -1246,7 +1354,6 @@
                         </div>
                     )}
                 </div>
-                {/* FIX: Button erscheint jetzt auch, wenn nur Shisha-Inventar gefüllt ist + Z-Index erhöht für Sichtbarkeit */}
                 {(Object.keys(cart).length > 0 || Object.keys(shishaInventory).length > 0) && (<div className="fixed bottom-0 w-full p-4 bg-white border-t z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]"><button onClick={() => setIsReviewing(true)} className="w-full bg-pink-600 text-white py-4 rounded-xl font-bold flex justify-between px-6"><span>Weiter</span><span>&rarr;</span></button></div>)}
             </div>
         );
@@ -1262,9 +1369,8 @@
         const [shoppingData, setShoppingData] = useState(null); 
         const [showPinChangeModal, setShowPinChangeModal] = useState(false);
         const [newPin, setNewPin] = useState("");
-        const [editingItem, setEditingItem] = useState(null); // NEU: State für Bearbeitung
+        const [editingItem, setEditingItem] = useState(null); 
 
-        // --- NEU: WhatsApp Senden Funktion ---
         const handleWhatsAppOrder = (supplierName, items, whatsappNumber, supplierConfig, notes) => {
             let text = `*Bestellung MABELLE*\nDatum: ${new Date().toLocaleDateString('de-DE')}\n`;
             if (supplierConfig.customerNumber) text += `Kd-Nr: ${supplierConfig.customerNumber}\n`;
@@ -1316,15 +1422,12 @@
                     const orderData = orderDoc.data();
                     const items = [...orderData.items];
                     
-                    // Wir suchen das Item anhand des Index, den wir in getAggregatedSupplierItems gespeichert haben
                     const idx = originalItem.originItemIndex;
                     
                     if (items[idx]) {
                         if (parseFloat(newQty) <= 0) {
-                            // Löschen: Aus dem Array entfernen
                             items.splice(idx, 1);
                         } else {
-                            // Update
                             items[idx] = { 
                                 ...items[idx], 
                                 quantity: Number(newQty), 
@@ -1418,7 +1521,6 @@
             try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'office_auth'), { pin: newPin }); alert("Geändert!"); setShowPinChangeModal(false); setNewPin(""); } catch(e) { alert("Fehler"); }
         };
 
-        // --- FIX: Fehlende Hilfsfunktion hinzugefügt, damit Archiv/Bestellungen nicht crashen ---
         const groupItemsBySupplier = (items) => {
             const groups = {};
             items.forEach(item => {
@@ -1435,7 +1537,6 @@
             
             activeOrders.forEach(order => {
                 const completed = order.completedSuppliers || [];
-                // HIER WICHTIG: itemIndex mitgeben, damit wir später genau dieses Item bearbeiten können
                 order.items.forEach((item, itemIdx) => {
                     const sup = item.supplier || 'Sonstige';
                     if(!completed.includes(sup)) {
@@ -1445,19 +1546,14 @@
                             originDept: order.department, 
                             originOrderId: order.id, 
                             originNote: order.note,
-                            originItemIndex: itemIdx // Für Edit-Funktion
+                            originItemIndex: itemIdx 
                         });
                     }
                 });
             });
             const mergedGroups = {};
             Object.keys(supplierGroups).forEach(sup => {
-                // Wir sortieren hier nur, wir mergen NICHT mehr visuell, damit man alles einzeln bearbeiten kann
-                // Oder wir mergen visuell nur den Titel, zeigen aber alle Items im "Breakdown"
-                
                 const rawItems = supplierGroups[sup];
-                
-                // Sortierung
                 mergedGroups[sup] = rawItems.sort((a, b) => {
                     const getSortKey = (item) => {
                         if (item.aisle) return item.aisle.toString().toLowerCase();
@@ -1482,7 +1578,6 @@
 
         return (
             <div className="min-h-screen bg-slate-100 flex flex-col">
-            {/* Bearbeitungs-Modal */}
             {editingItem && (
                 <EditItemModal 
                     item={editingItem} 
@@ -1524,7 +1619,6 @@
                                     const supplierConfig = suppliers.find(s => s.name === sup) || {};
                                     const isShopping = supplierConfig.orderMethod === 'shopping';
                                     
-                                    // HIER: Sammle Notizen für diesen Lieferanten
                                     const relevantOrders = orders.filter(o => o.status !== 'archived' && o.items.some(i => i.supplier === sup) && o.note);
                                     const uniqueNotes = [...new Set(relevantOrders.map(o => `${DEPT_NAMES[o.department] || o.department}: ${o.note}`))];
 
@@ -1557,7 +1651,6 @@
                                             </div>
                                         </div>
                                         
-                                        {/* Notizen-Anzeige im Dashboard */}
                                         {uniqueNotes.length > 0 && (
                                             <div className="bg-yellow-50 px-4 py-2 border-b border-yellow-100 text-sm text-yellow-800">
                                                 <div className="font-bold text-xs uppercase mb-1 flex items-center gap-1"><MessageSquare className="w-3 h-3"/> Hinweise:</div>
@@ -1573,7 +1666,6 @@
                                                     <div>
                                                         <div className="font-medium text-slate-800 flex items-center gap-2">
                                                             {item.name}
-                                                            {/* Edit Button erscheint beim Hover oder immer sichtbar auf Touch */}
                                                             <button onClick={() => setEditingItem(item)} className="p-1 text-slate-300 hover:text-pink-600 transition-colors"><Edit2 className="w-4 h-4"/></button>
                                                         </div>
                                                         <div className="flex gap-2 mt-1">
@@ -1648,10 +1740,9 @@
             const [suppliers, setSuppliers] = useState([]);
             const [installPrompt, setInstallPrompt] = useState(null);
 
-            // --- PWA: Install Prompt Listener ---
             useEffect(() => {
                 const handleBeforeInstallPrompt = (e) => {
-                    e.preventDefault(); // Verhindert den automatischen Browser-Dialog
+                    e.preventDefault(); 
                     setInstallPrompt(e);
                 };
                 window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -1670,8 +1761,6 @@
             useEffect(() => {
                 const initAuth = async () => {
                 try {
-                    // In der statischen HTML Version gibt es meist keinen Custom Token vom Server
-                    // Wir nutzen signInAnonymously als Fallback
                     if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
                         await signInWithCustomToken(auth, window.__initial_auth_token);
                     } else {
@@ -1708,7 +1797,6 @@
                 const unsubSup = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'suppliers')), (snapshot) => {
                     let f = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
                     f.sort((a,b) => {
-                        // Sort by sortOrder first, then name
                         const orderA = a.sortOrder !== undefined ? parseInt(a.sortOrder) : 100;
                         const orderB = b.sortOrder !== undefined ? parseInt(b.sortOrder) : 100;
                         if (orderA !== orderB) return orderA - orderB;
