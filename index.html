@@ -14,9 +14,8 @@
     <link id="dynamic-apple-icon" rel="apple-touch-icon" href="">
     <link id="dynamic-manifest" rel="manifest" href="">
 
-    <!-- App-Manifest -->
+    <!-- App-Manifest (Ohne die sw.js Fehlermeldung!) -->
     <script>
-        // 1. Manifest sofort generieren
         const svgIcon = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%23db2777'/%3E%3Ctext x='50%25' y='50%25' fill='white' font-size='280' font-family='sans-serif' font-weight='bold' text-anchor='middle' dominant-baseline='central'%3EM%3C/text%3E%3C/svg%3E`;
         const manifest = {
             name: "MABELLE Order System",
@@ -153,16 +152,20 @@
         return new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(date);
         };
 
-        // --- KI Service ---
+        // --- KI Service mit robustem Fallback ---
         const fetchAIsuggestion = async (productName, categories) => {
-            // WICHTIG: In dieser Arbeitsumgebung MUSS der API Key zwingend leer sein.
-            // Für deinen eigenen GitHub Pages Webspace, ändere die Zeile zu:
-            // const apiKey = "AIzaSyBQSrS2V9VHf2EbhjDo9Rv636NDaxqN94k";
-            const apiKey = "";
-            
-            // WICHTIG: In dieser Arbeitsumgebung MUSS zwingend dieses Preview-Modell verwendet werden.
-            // Falls dieses Modell auf GitHub Pages 403/404 Fehler wirft, ändere es dort zu 'gemini-1.5-flash-latest'
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            let apiKey = GEMINI_API_KEY;
+            let modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-pro'];
+
+            // Automatische Weiche: Wenn das hier im Editor läuft, müssen wir die speziellen Preview-Werte nutzen.
+            if (typeof window.__gemini_api_key !== 'undefined') {
+                apiKey = window.__gemini_api_key; 
+                modelsToTry = ['gemini-2.5-flash-preview-09-2025'];
+            }
+
+            if (!apiKey || apiKey.trim() === "") {
+                throw new Error("NO_API_KEY");
+            }
 
             const categoriesList = categories.map(c => ({ 
                 id: c.id, 
@@ -196,23 +199,38 @@
                 }
             };
 
-            let delays = [1000, 2000, 4000, 8000, 16000];
-            for (let i = 0; i < 6; i++) {
+            let lastErrorMsg = "";
+
+            // Wir probieren die KI-Modelle der Reihe nach durch
+            for (const model of modelsToTry) {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
                 try {
                     const response = await fetch(url, { 
                         method: "POST", 
                         headers: { "Content-Type": "application/json" }, 
                         body: JSON.stringify(payload) 
                     });
-                    if (!response.ok) throw new Error("API Error");
-                    const data = await response.json();
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if(text) return JSON.parse(text);
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        let text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                        if(text) {
+                            // Bereinige Markdown Formatierung, falls die KI dies versehentlich sendet
+                            text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+                            return JSON.parse(text);
+                        }
+                    } else {
+                        const errorData = await response.json().catch(() => ({}));
+                        console.warn(`KI Model ${model} schlug fehl:`, response.status, errorData);
+                        lastErrorMsg = `Google Fehler ${response.status}: ${errorData?.error?.message || 'Unbekannt'}`;
+                    }
                 } catch (err) {
-                    if (i === 5) throw err;
-                    await new Promise(r => setTimeout(r, delays[i]));
+                    console.warn(`Netzwerkfehler bei KI Model ${model}:`, err);
+                    lastErrorMsg = err.message;
                 }
             }
+            
+            throw new Error(lastErrorMsg || "Alle KI-Modelle sind fehlgeschlagen.");
         };
 
         // --- Custom Icons ---
@@ -613,11 +631,11 @@
                     });
                 }
             } catch (e) {
-                console.error(e);
+                console.error("Fehler in der UI bei KI:", e);
                 if (e.message === "NO_API_KEY") {
-                    setAiMessage({ type: 'error', text: 'KI nicht nutzbar: Bitte trage deinen kostenlosen Gemini API-Key im Code (Zeile 92) ein. Du bekommst ihn unter aistudio.google.com' });
+                    setAiMessage({ type: 'error', text: 'KI nicht nutzbar: Bitte trage deinen kostenlosen Gemini API-Key im Code ein.' });
                 } else {
-                    setAiMessage({ type: 'error', text: 'KI konnte leider keinen Vorschlag machen.' });
+                    setAiMessage({ type: 'error', text: `KI Fehler: ${e.message}` });
                 }
             } finally {
                 setIsAILoading(false);
