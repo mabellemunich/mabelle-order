@@ -155,7 +155,7 @@
         // --- KI Service mit robustem Fallback ---
         const fetchAIsuggestion = async (productName, categories) => {
             let apiKey = GEMINI_API_KEY;
-            let modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-pro'];
+            let modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.5-flash-preview-09-2025'];
 
             // Automatische Weiche: Wenn das hier im Editor läuft, müssen wir die speziellen Preview-Werte nutzen.
             if (typeof window.__gemini_api_key !== 'undefined') {
@@ -199,7 +199,7 @@
                 }
             };
 
-            let lastErrorMsg = "";
+            let errorMessages = [];
 
             // Wir probieren die KI-Modelle der Reihe nach durch
             for (const model of modelsToTry) {
@@ -222,15 +222,15 @@
                     } else {
                         const errorData = await response.json().catch(() => ({}));
                         console.warn(`KI Model ${model} schlug fehl:`, response.status, errorData);
-                        lastErrorMsg = `Google Fehler ${response.status}: ${errorData?.error?.message || 'Unbekannt'}`;
+                        errorMessages.push(`${model} (${response.status})`);
                     }
                 } catch (err) {
                     console.warn(`Netzwerkfehler bei KI Model ${model}:`, err);
-                    lastErrorMsg = err.message;
+                    errorMessages.push(`${model} (Netzwerkfehler)`);
                 }
             }
             
-            throw new Error(lastErrorMsg || "Alle KI-Modelle sind fehlgeschlagen.");
+            throw new Error(`Fehler: ${errorMessages.join(' | ')}`);
         };
 
         // --- Custom Icons ---
