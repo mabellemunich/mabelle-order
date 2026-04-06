@@ -155,11 +155,11 @@
         // --- KI Service mit robustem Fallback ---
         const fetchAIsuggestion = async (productName, categories) => {
             let apiKey = GEMINI_API_KEY;
-            // Wir probieren die aktuellsten Modelle nacheinander durch
-            let modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+            // Wir probieren die stabilsten Modelle nacheinander durch (1.5 ist am zuverlässigsten)
+            let modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.5-flash'];
 
             // Automatische Weiche für den internen Editor
-            if (typeof window.__gemini_api_key !== 'undefined') {
+            if (typeof window.__gemini_api_key !== 'undefined' && window.__gemini_api_key) {
                 apiKey = window.__gemini_api_key; 
                 modelsToTry = ['gemini-2.5-flash-preview-09-2025'];
             }
@@ -222,20 +222,21 @@
                         const errorData = await response.json().catch(() => ({}));
                         console.warn(`KI Model ${model} schlug fehl:`, response.status, errorData);
                         errorMessages.push(`${model} (${response.status})`);
-                        
-                        // Wenn Google 404 oder 403 zurückgibt, liegt es zu 100% am API Key oder fehlenden Rechten
-                        if (response.status === 404 || response.status === 403) {
-                            throw new Error("KEY_INVALID");
-                        }
                     }
                 } catch (err) {
-                    if (err.message === "KEY_INVALID") throw err;
                     console.warn(`Netzwerkfehler bei KI Model ${model}:`, err);
                     errorMessages.push(`${model} (Fehler)`);
                 }
             }
             
-            throw new Error(`Alle Modelle fehlgeschlagen: ${errorMessages.join(', ')}`);
+            // Wenn alle Modelle fehlschlagen, werten wir die gesammelten Fehler aus
+            if (errorMessages.some(msg => msg.includes('403'))) {
+                throw new Error("FORBIDDEN_403");
+            } else if (errorMessages.some(msg => msg.includes('400'))) {
+                throw new Error("KEY_INVALID");
+            }
+            
+            throw new Error(`Fehlschlag: ${errorMessages.join(', ')}`);
         };
 
         // --- Custom Icons ---
@@ -638,7 +639,9 @@
             } catch (e) {
                 console.error("Fehler in der UI bei KI:", e);
                 if (e.message === "NO_API_KEY" || e.message === "KEY_INVALID") {
-                    setAiMessage({ type: 'error', text: 'Google lehnt den API-Key ab (Fehler 404/403). Bitte erstelle einen GANZ NEUEN Key auf aistudio.google.com!' });
+                    setAiMessage({ type: 'error', text: 'Google API-Key ist ungültig (Fehler 400). Bitte prüfe den Schlüssel im Code!' });
+                } else if (e.message === "FORBIDDEN_403") {
+                    setAiMessage({ type: 'error', text: 'Fehler 403: Zugriff verweigert. Entweder ist die "Generative Language API" im Projekt nicht aktiviert oder Website-Einschränkungen blockieren den Zugriff.' });
                 } else {
                     setAiMessage({ type: 'error', text: `KI Fehler: ${e.message}` });
                 }
