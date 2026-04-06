@@ -155,9 +155,10 @@
         // --- KI Service mit robustem Fallback ---
         const fetchAIsuggestion = async (productName, categories) => {
             let apiKey = GEMINI_API_KEY;
-            let modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.5-flash-preview-09-2025'];
+            // Wir probieren die aktuellsten Modelle nacheinander durch
+            let modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 
-            // Automatische Weiche: Wenn das hier im Editor läuft, müssen wir die speziellen Preview-Werte nutzen.
+            // Automatische Weiche für den internen Editor
             if (typeof window.__gemini_api_key !== 'undefined') {
                 apiKey = window.__gemini_api_key; 
                 modelsToTry = ['gemini-2.5-flash-preview-09-2025'];
@@ -201,7 +202,6 @@
 
             let errorMessages = [];
 
-            // Wir probieren die KI-Modelle der Reihe nach durch
             for (const model of modelsToTry) {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
                 try {
@@ -215,7 +215,6 @@
                         const data = await response.json();
                         let text = data.candidates?.[0]?.content?.parts?.[0]?.text;
                         if(text) {
-                            // Bereinige Markdown Formatierung, falls die KI dies versehentlich sendet
                             text = text.replace(/```json/g, '').replace(/```/g, '').trim();
                             return JSON.parse(text);
                         }
@@ -223,14 +222,20 @@
                         const errorData = await response.json().catch(() => ({}));
                         console.warn(`KI Model ${model} schlug fehl:`, response.status, errorData);
                         errorMessages.push(`${model} (${response.status})`);
+                        
+                        // Wenn Google 404 oder 403 zurückgibt, liegt es zu 100% am API Key oder fehlenden Rechten
+                        if (response.status === 404 || response.status === 403) {
+                            throw new Error("KEY_INVALID");
+                        }
                     }
                 } catch (err) {
+                    if (err.message === "KEY_INVALID") throw err;
                     console.warn(`Netzwerkfehler bei KI Model ${model}:`, err);
-                    errorMessages.push(`${model} (Netzwerkfehler)`);
+                    errorMessages.push(`${model} (Fehler)`);
                 }
             }
             
-            throw new Error(`Fehler: ${errorMessages.join(' | ')}`);
+            throw new Error(`Alle Modelle fehlgeschlagen: ${errorMessages.join(', ')}`);
         };
 
         // --- Custom Icons ---
@@ -632,8 +637,8 @@
                 }
             } catch (e) {
                 console.error("Fehler in der UI bei KI:", e);
-                if (e.message === "NO_API_KEY") {
-                    setAiMessage({ type: 'error', text: 'KI nicht nutzbar: Bitte trage deinen kostenlosen Gemini API-Key im Code ein.' });
+                if (e.message === "NO_API_KEY" || e.message === "KEY_INVALID") {
+                    setAiMessage({ type: 'error', text: 'Google lehnt den API-Key ab (Fehler 404/403). Bitte erstelle einen GANZ NEUEN Key auf aistudio.google.com!' });
                 } else {
                     setAiMessage({ type: 'error', text: `KI Fehler: ${e.message}` });
                 }
